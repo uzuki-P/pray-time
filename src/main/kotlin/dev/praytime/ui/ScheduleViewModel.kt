@@ -34,9 +34,11 @@ data class CountdownState(
 
 class ScheduleViewModel(
     private val clock: Clock = Clock.systemDefaultZone(),
-    val region: Region = medanJohor,
+    region: Region = medanJohor,
 ) {
-    private val zone = ZoneId.of(region.timezoneId)
+    var region: Region = region
+        private set
+    private val zone: ZoneId get() = ZoneId.of(region.timezoneId)
     private val _dayTimes = MutableStateFlow(PrayerTimeCalculator.calculate(localDate(), region))
     val dayTimes = _dayTimes.asStateFlow()
     private var tomorrow = PrayerTimeCalculator.calculate(localDate().plusDays(1), region)
@@ -50,6 +52,21 @@ class ScheduleViewModel(
     }
 
     fun now(): Instant = clock.instant()
+
+    fun restoreCompleted(instants: Set<Instant>) {
+        val todayInstants = _dayTimes.value.times.map { it.instant }.toSet()
+        _completed.value = instants.filterTo(mutableSetOf()) { it in todayInstants }
+    }
+
+    fun setRegion(value: Region) {
+        if (value == region) return
+        region = value
+        val date = localDate()
+        _dayTimes.value = PrayerTimeCalculator.calculate(date, region)
+        tomorrow = PrayerTimeCalculator.calculate(date.plusDays(1), region)
+        _completed.value = emptySet()
+        tick()
+    }
 
     suspend fun run() {
         while (true) {

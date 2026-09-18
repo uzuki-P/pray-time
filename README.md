@@ -15,7 +15,7 @@ Requirements:
 just dev
 ```
 
-The tray menu can reopen the window, send a test notification, or quit the app. Closing the window leaves the tray process running.
+On Linux the tray is a hand-rolled StatusNotifierItem over DBus (dbus-java) with `ItemIsMenu=false`, so a left click toggles the compact popup directly — no menu detour, no xembed proxy. The popup shows the region, next prayer with live countdown, and today's checklist; left click again dismisses it. The right-click menu (rendered by the desktop via DBusMenu) has "Open schedule" and Quit. Closing the main window only hides it — the app keeps running in the tray until Quit. Windows and macOS still use the ComposeNativeTray library. Closing the window leaves the tray process running.
 
 ## Project direction
 

@@ -1,5 +1,6 @@
 package dev.praytime.ui
 
+import dev.praytime.domain.Region
 import dev.praytime.domain.medanJohor
 import java.time.Clock
 import java.time.Duration
@@ -130,5 +131,17 @@ class ScheduleViewModelTest {
         val (_, viewModel) = viewModel(morning)
         assertEquals(medanJohor, viewModel.region)
         assertEquals(medanJohor, viewModel.dayTimes.value.region)
+    }
+
+    @Test
+    fun setRegionRecomputesTimesAndKeepsNextTarget() {
+        val (_, viewModel) = viewModel(morning)
+        val singapore = Region("Singapore", "Central", "Singapore", 1.3521, 103.8198, "Asia/Singapore")
+        viewModel.setRegion(singapore)
+        assertEquals(singapore, viewModel.region)
+        assertEquals(singapore, viewModel.dayTimes.value.region)
+        val state = viewModel.countdown.value
+        assertEquals("Dhuhr", state.nextPrayer?.name)
+        assertTrue(state.timeRemaining!!.isPositive)
     }
 }
