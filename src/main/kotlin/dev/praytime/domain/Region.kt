@@ -8,7 +8,8 @@ data class Region(
     val longitude: Double,
     val timezoneId: String,
 ) {
-    val displayName: String get() = "$name, $adminName, $country"
+    val displayName: String
+        get() = listOfNotNull(name, adminName.ifBlank { null }, country).joinToString(", ")
 }
 
 val medanJohor = Region(

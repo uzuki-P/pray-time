@@ -17,6 +17,12 @@ just dev
 
 On Linux the tray is a hand-rolled StatusNotifierItem over DBus (dbus-java) with `ItemIsMenu=false`, so a left click toggles the compact popup directly — no menu detour, no xembed proxy. The popup shows the region, next prayer with live countdown, and today's checklist; left click again dismisses it. The right-click menu (rendered by the desktop via DBusMenu) has "Open schedule" and Quit. Closing the main window only hides it — the app keeps running in the tray until Quit. Windows and macOS still use the ComposeNativeTray library. Closing the window leaves the tray process running.
 
+## Location search and data files
+
+State lives in `$XDG_CONFIG_HOME/praytime/state.properties` (falling back to `~/.config/praytime/`): selected region, today's completed prayers, and up to 10 recently selected locations. The Medan-area built-in list stays in code and is always available.
+
+A worldwide city list (~169k entries from GeoNames, stored as SQLite) ships inside the app. On the first search it is extracted once to `~/.config/praytime/cities.db`, and lookups then run inside SQLite — the list is only read while you are actually searching, never at startup, and is never held in memory.
+
 ## Project direction
 
 The intended product flow is:
@@ -30,10 +36,9 @@ Keep calculation, scheduling, persistence, and UI in separate packages as the ap
 
 ## Work left for the next implementation pass
 
-- Add region search and timezone handling.
-- Persist the selected region, notification lead time, and completed prayers.
+- Persist the notification lead time.
 - Schedule quiet notifications shortly before each prayer, surviving sleep, wake, timezone changes, and daylight-saving changes.
-- Add Linux autostart and Windows startup options behind a user setting.
+- Verify Windows autostart (implemented via the HKCU Run key; Linux XDG autostart is done and tested).
 - Decide how to handle notification permissions and desktop-environment differences.
 - Extend tests for month boundaries and high-latitude edge cases.
 

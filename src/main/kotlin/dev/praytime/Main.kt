@@ -45,6 +45,7 @@ import dev.nucleusframework.composenativetray.tray.api.Tray
 import dev.praytime.domain.builtInRegions
 import dev.praytime.domain.medanJohor
 import dev.praytime.platform.AppState
+import dev.praytime.platform.Autostart
 import dev.praytime.platform.LinuxSniTray
 import dev.praytime.resources.Res
 import dev.praytime.resources.pray_time_app_dark
@@ -54,6 +55,7 @@ import dev.praytime.resources.pray_time_tray_light
 import dev.praytime.ui.CompactView
 import dev.praytime.ui.ScheduleViewModel
 import dev.praytime.ui.cardSurface
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import java.awt.KeyboardFocusManager
@@ -82,13 +84,18 @@ fun main() = application {
         painterResource(Res.drawable.pray_time_tray_light)
     }
     val viewModel = remember {
-        ScheduleViewModel(region = AppState.loadRegion(builtInRegions) ?: medanJohor)
+        ScheduleViewModel(region = AppState.loadRegion(builtInRegions + AppState.recentRegions()) ?: medanJohor).apply {
+            // Restore synchronously, before any collector can observe and re-save the empty initial set.
+            restoreCompleted(AppState.loadCompleted(dayTimes.value.date))
+        }
     }
     val quit = { exitApplication() }
 
     LaunchedEffect(viewModel) {
-        viewModel.restoreCompleted(AppState.loadCompleted(viewModel.dayTimes.value.date))
         viewModel.run()
+    }
+    LaunchedEffect(Unit) {
+        launch(Dispatchers.IO) { Autostart.refresh() }
     }
     LaunchedEffect(viewModel) {
         launch {

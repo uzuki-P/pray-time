@@ -1,6 +1,9 @@
 .gradle/
 build/
+_apk/
 .idea/
 *.iml
 out/
 local.properties
+hs_err_pid*.log
+replay_pid*.log

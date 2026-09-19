@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,12 @@ import androidx.compose.ui.unit.sp
 import dev.praytime.calculation.DayPrayerTimes
 import dev.praytime.domain.Region
 import dev.praytime.domain.builtInRegions
+import dev.praytime.platform.AppState
+import dev.praytime.platform.Autostart
+import dev.praytime.platform.CityCatalog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
@@ -152,7 +159,9 @@ fun CompactView(viewModel: ScheduleViewModel) {
             if (showSettings) {
                 SettingsPane(
                     selected = dayTimes.region,
+                    onBack = { showSettings = false },
                     onSelect = {
+                        AppState.saveRecentRegion(it)
                         viewModel.setRegion(it)
                         showSettings = false
                     },
@@ -231,54 +240,154 @@ fun CompactView(viewModel: ScheduleViewModel) {
 }
 
 @Composable
-private fun SettingsPane(selected: Region, onSelect: (Region) -> Unit) {
+private fun SettingsPane(selected: Region, onBack: () -> Unit, onSelect: (Region) -> Unit) {
     var query by remember { mutableStateOf("") }
+    var catalogResults by remember { mutableStateOf<List<Region>?>(null) }
+    val recents = remember { AppState.recentRegions() }
+    var autostartEnabled by remember { mutableStateOf(Autostart.isEnabled()) }
+
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            catalogResults = null
+            return@LaunchedEffect
+        }
+        delay(250)
+        catalogResults = withContext(Dispatchers.IO) { CityCatalog.search(q) }
+    }
+
+    val q = query.trim()
+    val localMatches = builtInRegions.filter { it.displayName.contains(q, ignoreCase = true) } +
+        recents.filter {
+            it.displayName.contains(q, ignoreCase = true) &&
+                builtInRegions.none { builtin -> builtin.name == it.name && builtin.country == it.country }
+        }
+    val merged = catalogResults
+        ?.let { catalog -> localMatches + catalog.filter { r -> localMatches.none { it.name == r.name && it.country == r.country } } }
+
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onBack)
+                .padding(horizontal = 4.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "‹",
+                style = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Black),
+                color = Color(0xFF9D8CFF),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "BACK",
+                style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp),
+                color = Color(0xFF9D8CFF),
+            )
+        }
         SearchField(
             query = query,
             onQueryChange = { query = it },
         )
         Spacer(Modifier.height(8.dp))
-        val filtered = builtInRegions.filter { it.displayName.contains(query, ignoreCase = true) }
-        if (filtered.isEmpty()) {
-            Text(
-                "No location matches \"$query\"",
-                style = TextStyle(fontSize = 11.sp),
-                color = Color.White.copy(alpha = 0.35f),
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-            )
-        }
         Column(
-            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            filtered.forEach { region ->
-                val isSelected = region == selected
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(26.dp)
-                        .clickable { onSelect(region) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = if (isSelected) 0.7f else 0.2f)),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        region.displayName,
-                        style = TextStyle(fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium),
-                        color = Color.White.copy(alpha = if (isSelected) 1f else 0.75f),
-                        modifier = Modifier.weight(1f),
-                    )
-                    CheckCircle(done = isSelected, size = 16.dp, iconSize = 10.sp, onClick = { onSelect(region) })
+            if (q.isEmpty()) {
+                if (recents.isNotEmpty()) {
+                    SectionLabel("RECENT")
+                    RegionRows(recents, selected, onSelect)
+                }
+                SectionLabel("ALL LOCATIONS")
+                RegionRows(builtInRegions, selected, onSelect)
+            } else if (merged != null && merged.isEmpty()) {
+                Text(
+                    "No location matches \"$q\"",
+                    style = TextStyle(fontSize = 11.sp),
+                    color = Color.White.copy(alpha = 0.35f),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                )
+            } else {
+                if (merged != null) {
+                    RegionRows(merged, selected, onSelect)
+                } else if (localMatches.isNotEmpty()) {
+                    RegionRows(localMatches, selected, onSelect)
+                }
+                if (catalogResults == null) {
+                    SectionLabel("SEARCHING…")
                 }
             }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(26.dp)
+                .clickable {
+                    Autostart.setEnabled(!autostartEnabled)
+                    autostartEnabled = Autostart.isEnabled()
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Start on login",
+                style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+                color = Color.White.copy(alpha = 0.75f),
+                modifier = Modifier.weight(1f),
+            )
+            CheckCircle(
+                done = autostartEnabled,
+                size = 16.dp,
+                iconSize = 10.sp,
+                onClick = {
+                    Autostart.setEnabled(!autostartEnabled)
+                    autostartEnabled = Autostart.isEnabled()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(label: String) {
+    Text(
+        label,
+        style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp),
+        color = Color.White.copy(alpha = 0.4f),
+        modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun RegionRows(regions: List<Region>, selected: Region, onSelect: (Region) -> Unit) {
+    regions.forEach { region ->
+        val isSelected = region == selected
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(26.dp)
+                .clickable { onSelect(region) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = if (isSelected) 0.7f else 0.2f)),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                region.displayName,
+                style = TextStyle(fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium),
+                color = Color.White.copy(alpha = if (isSelected) 1f else 0.75f),
+                modifier = Modifier.weight(1f),
+            )
+            CheckCircle(done = isSelected, size = 16.dp, iconSize = 10.sp, onClick = { onSelect(region) })
         }
     }
 }

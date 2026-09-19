@@ -10,6 +10,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 data class DayPrayerTimes(
     val date: LocalDate,
@@ -56,8 +57,10 @@ object PrayerTimeCalculator {
         return DayPrayerTimes(
             date = date,
             region = region,
+            // adhan's instants carry millisecond jitter between runs, so truncate to
+            // minutes - completed-prayer identity must survive restarts.
             times = entries.map { (name, javaDate) ->
-                PrayerTime(name, javaDate.toInstant(), region.timezoneId)
+                PrayerTime(name, javaDate.toInstant().truncatedTo(ChronoUnit.MINUTES), region.timezoneId)
             }.sortedBy { it.instant },
         )
     }

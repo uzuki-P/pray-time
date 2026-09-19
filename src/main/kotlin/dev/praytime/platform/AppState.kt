@@ -10,13 +10,12 @@ import java.time.LocalDate
  * Values are region names, ISO dates, and comma-separated ISO instants - no quoting needed.
  */
 object AppState {
-    private val file: File by lazy {
+    val dir: File by lazy {
         val configHome = System.getenv("XDG_CONFIG_HOME")?.takeIf { it.isNotBlank() }
             ?: (System.getProperty("user.home") + "/.config")
-        val dir = File(configHome, "praytime")
-        dir.mkdirs()
-        File(dir, "state.properties")
+        File(configHome, "praytime").apply { mkdirs() }
     }
+    private val file: File get() = File(dir, "state.properties")
 
     private var cached: Map<String, String>? = null
 
@@ -37,8 +36,23 @@ object AppState {
     }
 
     fun saveCompleted(today: LocalDate, instants: Set<Instant>) {
-        writeField("completedDate", today.toString())
-        writeField("completed", instants.joinToString(",") { it.toString() })
+        val updated = read().toMutableMap()
+        updated["completedDate"] = today.toString()
+        updated["completed"] = instants.joinToString(",") { it.toString() }
+        commit(updated)
+    }
+
+    fun recentRegions(): List<Region> =
+        (0 until RECENT_LIMIT).mapNotNull { parseRegion(readField("recent.$it")) }
+
+    fun saveRecentRegion(region: Region) {
+        val current = recentRegions()
+            .filterNot { it.name == region.name && it.country == region.country }
+        val updated = read().toMutableMap()
+        updated.keys.removeAll { it.startsWith("recent.") }
+        (listOf(region) + current).take(RECENT_LIMIT)
+            .forEachIndexed { index, r -> updated["recent.$index"] = encodeRegion(r) }
+        commit(updated)
     }
 
     private fun read(): Map<String, String> {
@@ -62,7 +76,38 @@ object AppState {
     private fun writeField(key: String, value: String) {
         val updated = read().toMutableMap()
         updated[key] = value
-        cached = updated
-        runCatching { file.writeText(updated.entries.joinToString("\n") { "${it.key}=${it.value}" }) }
+        commit(updated)
     }
+
+    private fun commit(updated: Map<String, String>) {
+        cached = updated
+        runCatching {
+            val tmp = File(dir, file.name + ".tmp")
+            tmp.writeText(updated.entries.joinToString("\n") { "${it.key}=${it.value}" })
+            if (!tmp.renameTo(file)) {
+                file.writeText(tmp.readText())
+                tmp.delete()
+            }
+        }
+    }
+
+    private fun encodeRegion(region: Region): String = listOf(
+        region.name.replace('|', ' '),
+        region.adminName.replace('|', ' '),
+        region.country.replace('|', ' '),
+        region.latitude,
+        region.longitude,
+        region.timezoneId,
+    ).joinToString("|")
+
+    private fun parseRegion(value: String?): Region? {
+        if (value == null) return null
+        val fields = value.split('|')
+        if (fields.size < 6) return null
+        val latitude = fields[3].toDoubleOrNull() ?: return null
+        val longitude = fields[4].toDoubleOrNull() ?: return null
+        return Region(fields[0], fields[1], fields[2], latitude, longitude, fields[5])
+    }
+
+    private const val RECENT_LIMIT = 10
 }
