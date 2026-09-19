@@ -29,6 +29,8 @@ dependencies {
     implementation("com.github.hypfvieh:dbus-java-core:5.2.1")
     implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.2.1")
     implementation("org.xerial:sqlite-jdbc:3.53.4.0")
+    // Provides Dispatchers.Main (EDT) on desktop; required by ComposeNativeTray's Windows tray thread.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.11.0")
     testImplementation(kotlin("test"))
 }
 
