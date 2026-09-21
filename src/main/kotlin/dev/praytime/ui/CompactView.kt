@@ -1,5 +1,11 @@
 package dev.praytime.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,8 +25,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +41,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -43,6 +54,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.launch
 
 internal val prayerColors = mapOf(
     "Fajr" to Color(0xFF9D8CFF),
@@ -221,32 +233,64 @@ internal fun CheckCircle(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(
-                when {
-                    done -> Color(0xFF3EDC81)
-                    !enabled -> Color.White.copy(alpha = 0.06f)
-                    else -> Color.Transparent
-                },
-            )
-            .border(1.5.dp, Color.White.copy(alpha = if (enabled) 0.3f else 0.12f), CircleShape)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        when {
-            done -> Text(
-                "✓",
-                style = TextStyle(fontSize = iconSize, fontWeight = FontWeight.Black),
-                color = Color(0xFF0B2E1B),
-            )
-            !enabled -> Box(
+    val prayedGreen = Color(0xFF3EDC81)
+    val pop = remember { Animatable(1f) }
+    val burst = remember { Animatable(0f) }
+    var wasDone by remember { mutableStateOf(done) }
+    LaunchedEffect(done) {
+        if (done && !wasDone) {
+            pop.snapTo(0.55f)
+            burst.snapTo(0f)
+            launch { pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = Spring.StiffnessMedium)) }
+            burst.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+        }
+        wasDone = done
+    }
+    val fill by animateColorAsState(
+        targetValue = when {
+            done -> prayedGreen
+            !enabled -> Color.White.copy(alpha = 0.06f)
+            else -> Color.Transparent
+        },
+        label = "checkFill",
+    )
+    Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
+        if (burst.value > 0f && burst.value < 1f) {
+            Box(
                 modifier = Modifier
-                    .size(width = 6.dp, height = 1.5.dp)
-                    .background(Color.White.copy(alpha = 0.25f)),
+                    .size(size * (1f + 0.9f * burst.value))
+                    .border(
+                        width = (1.5f * (1f - burst.value)).dp,
+                        color = prayedGreen.copy(alpha = 1f - burst.value),
+                        shape = CircleShape,
+                    ),
             )
+        }
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    scaleX = pop.value
+                    scaleY = pop.value
+                }
+                .clip(CircleShape)
+                .background(fill)
+                .border(1.5.dp, Color.White.copy(alpha = if (enabled) 0.3f else 0.12f), CircleShape)
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                done -> Text(
+                    "✓",
+                    style = TextStyle(fontSize = iconSize, fontWeight = FontWeight.Black),
+                    color = Color(0xFF0B2E1B),
+                )
+                !enabled -> Box(
+                    modifier = Modifier
+                        .size(width = 6.dp, height = 1.5.dp)
+                        .background(Color.White.copy(alpha = 0.25f)),
+                )
+            }
         }
     }
 }

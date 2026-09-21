@@ -1,5 +1,12 @@
 package dev.praytime.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,16 +23,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.praytime.calculation.PrayerTime
+import kotlinx.coroutines.launch
 
 private val dueAmber = Color(0xFFFFC24D)
 private val prayedGreen = Color(0xFF3EDC81)
@@ -39,10 +53,58 @@ fun PrayerNotification(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(20.dp)
+    val scope = rememberCoroutineScope()
+    var celebrating by remember { mutableStateOf(false) }
+    var shaking by remember { mutableStateOf(false) }
+    val pop = remember { Animatable(1f) }
+    val shake = remember { Animatable(0f) }
+    val busy = celebrating || shaking
+
+    fun celebrate() {
+        if (busy) return
+        celebrating = true
+        scope.launch {
+            pop.animateTo(1.06f, tween(110, easing = FastOutSlowInEasing))
+            pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow))
+            onPrayed()
+        }
+    }
+
+    fun reluctantDismiss() {
+        if (busy) return
+        shaking = true
+        scope.launch {
+            shake.animateTo(
+                targetValue = 0f,
+                animationSpec = keyframes {
+                    durationMillis = 420
+                    0f at 0
+                    -7f at 70
+                    7f at 140
+                    -5f at 210
+                    5f at 280
+                    -2f at 350
+                    0f at 420
+                },
+            )
+            onDismiss()
+        }
+    }
+
+    val closeTint by animateColorAsState(
+        targetValue = if (shaking) dueAmber else Color.White.copy(alpha = 0.75f),
+        label = "closeTint",
+    )
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .width(272.dp)
+                .graphicsLayer {
+                    scaleX = pop.value
+                    scaleY = pop.value
+                    translationX = shake.value.dp.toPx()
+                }
                 .shadow(6.dp, shape)
                 .clip(shape)
                 .background(cardSurface)
@@ -79,13 +141,13 @@ fun PrayerNotification(
                         .size(24.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.1f))
-                        .clickable(onClick = onDismiss),
+                        .clickable(onClick = ::reluctantDismiss),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         "✕",
                         style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black),
-                        color = Color.White.copy(alpha = 0.75f),
+                        color = closeTint,
                     )
                 }
             }
@@ -99,8 +161,8 @@ fun PrayerNotification(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(prayedGreen)
-                    .clickable(onClick = onPrayed)
+                    .background(if (celebrating) prayedGreenBright else prayedGreen)
+                    .clickable(onClick = ::celebrate)
                     .padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -119,3 +181,5 @@ fun PrayerNotification(
         }
     }
 }
+
+private val prayedGreenBright = Color(0xFF5CEBA0)
