@@ -45,6 +45,21 @@ object AppState {
     fun recentRegions(): List<Region> =
         (0 until RECENT_LIMIT).mapNotNull { parseRegion(readField("recent.$it")) }
 
+    fun loadReminderEnabled(): Boolean = readField("reminder.enabled") != "false"
+
+    fun saveReminderEnabled(enabled: Boolean) = writeField("reminder.enabled", enabled.toString())
+
+    fun loadMainAnchor(): WindowAnchor = loadAnchor("main.anchor")
+
+    fun saveMainAnchor(anchor: WindowAnchor) = writeField("main.anchor", anchor.name)
+
+    fun loadReminderAnchor(): WindowAnchor = loadAnchor("reminder.anchor")
+
+    fun saveReminderAnchor(anchor: WindowAnchor) = writeField("reminder.anchor", anchor.name)
+
+    private fun loadAnchor(key: String): WindowAnchor =
+        readField(key)?.let { runCatching { WindowAnchor.valueOf(it) }.getOrNull() } ?: WindowAnchor.TOP_RIGHT
+
     fun saveRecentRegion(region: Region) {
         val current = recentRegions()
             .filterNot { it.name == region.name && it.country == region.country }

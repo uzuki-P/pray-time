@@ -148,6 +148,7 @@ private const val MENU_PATH = "/StatusNotifierMenu"
 class LinuxSniTray(
     private val onPrimaryClick: () -> Unit,
     private val onContextMenu: (x: Int, y: Int) -> Unit,
+    private val onSettings: () -> Unit,
     private val onQuit: () -> Unit,
 ) {
     private var connection: DBusConnection? = null
@@ -211,7 +212,8 @@ class LinuxSniTray(
     private fun menuItems(): List<MenuLayout> = listOf(
         MenuLayout(1, itemProps("Show / Hide popup"), emptyList()),
         MenuLayout(2, mapOf("type" to Variant("separator")), emptyList()),
-        MenuLayout(3, itemProps("Quit"), emptyList()),
+        MenuLayout(3, itemProps("Settings"), emptyList()),
+        MenuLayout(4, itemProps("Quit"), emptyList()),
     )
 
     private fun itemProps(label: String): Map<String, Variant<Any?>> = mapOf(
@@ -272,7 +274,8 @@ class LinuxSniTray(
             return ids.map { id ->
                 val props = when (id) {
                     1 -> itemProps("Show / Hide popup")
-                    3 -> itemProps("Quit")
+                    3 -> itemProps("Settings")
+                    4 -> itemProps("Quit")
                     else -> emptyMap()
                 }
                 ItemProperties(id, props)
@@ -285,7 +288,8 @@ class LinuxSniTray(
             if (eventId != "clicked") return
             when (id) {
                 1 -> onPrimaryClick()
-                3 -> onQuit()
+                3 -> onSettings()
+                4 -> onQuit()
             }
         }
 

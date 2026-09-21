@@ -22,11 +22,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -52,13 +54,22 @@ import dev.praytime.resources.pray_time_app_dark
 import dev.praytime.resources.pray_time_app_light
 import dev.praytime.resources.pray_time_tray_dark
 import dev.praytime.resources.pray_time_tray_light
+import dev.praytime.calculation.PrayerTime
+import dev.praytime.platform.WindowAnchor
+import dev.praytime.platform.anchorPosition
 import dev.praytime.ui.CompactView
+import dev.praytime.ui.PrayerNotification
+import dev.praytime.ui.ReminderController
 import dev.praytime.ui.ScheduleViewModel
+import dev.praytime.ui.SettingsView
 import dev.praytime.ui.cardSurface
+import dev.praytime.ui.latestDuePrayer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import java.awt.KeyboardFocusManager
+import java.awt.Point
 import java.awt.Toolkit
 import java.beans.PropertyChangeListener
 import kotlin.math.roundToInt
@@ -71,6 +82,9 @@ fun main() = application {
     var menuPosition by remember { mutableStateOf(0 to 0) }
     var menuSuppressUntil by remember { mutableStateOf(0L) }
     var menuHadFocus by remember { mutableStateOf(false) }
+    var settingsVisible by remember { mutableStateOf(false) }
+    var settingsSuppressUntil by remember { mutableStateOf(0L) }
+    var settingsHadFocus by remember { mutableStateOf(false) }
 
     val darkTheme = isSystemInDarkTheme()
     val appIcon = if (darkTheme) {
@@ -91,6 +105,14 @@ fun main() = application {
     }
     val quit = { exitApplication() }
 
+    val reminderController = remember { ReminderController() }
+    var notifyVisible by remember { mutableStateOf(false) }
+    var notifyPrayer by remember { mutableStateOf<PrayerTime?>(null) }
+    val dismissNotification = {
+        reminderController.dismiss(AppState.loadReminderEnabled())
+        notifyVisible = false
+    }
+
     LaunchedEffect(viewModel) {
         viewModel.run()
     }
@@ -103,6 +125,16 @@ fun main() = application {
         }
         launch {
             viewModel.dayTimes.collect { AppState.saveRegion(it.region) }
+        }
+        launch {
+            // countdown ticks every second, driving both due detection and snooze expiry.
+            combine(viewModel.dayTimes, viewModel.completed, viewModel.countdown) { day, completed, _ ->
+                latestDuePrayer(day, completed, viewModel.now())
+            }.collect { due ->
+                reminderController.onTick(due, AppState.loadReminderEnabled())
+                notifyPrayer = reminderController.current
+                notifyVisible = reminderController.visible && !compactVisible && !menuVisible
+            }
         }
     }
 
@@ -122,6 +154,14 @@ fun main() = application {
             menuVisible = true
         }
     }
+    val showSettingsWindow = {
+        settingsSuppressUntil = System.currentTimeMillis() + 400
+        settingsHadFocus = false
+        // Settings taking focus must not read as the popup losing it, else
+        // closing settings later would close the popup too.
+        compactHadFocus = false
+        settingsVisible = true
+    }
     val isLinux = System.getProperty("os.name").lowercase().contains("linux")
 
     if (isLinux) {
@@ -132,6 +172,7 @@ fun main() = application {
             val tray = LinuxSniTray(
                 onPrimaryClick = { onEdt { toggleCompact() } },
                 onContextMenu = { x, y -> onEdt { showMenu(x, y) } },
+                onSettings = { onEdt { showSettingsWindow() } },
                 onQuit = { onEdt { quit() } },
             )
             tray.start()
@@ -144,6 +185,7 @@ fun main() = application {
             primaryAction = { toggleCompact() },
         ) {
             Item("Show / Hide popup") { toggleCompact() }
+            Item("Settings") { showSettingsWindow() }
             Divider()
             Item("Quit") { quit() }
         }
@@ -165,6 +207,17 @@ fun main() = application {
         ),
     ) {
         TransparentWindowBackground(window)
+        val density = LocalDensity.current
+        LaunchedEffect(compactVisible) {
+            if (!compactVisible) return@LaunchedEffect
+            val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .defaultScreenDevice.defaultConfiguration.bounds
+            val margin = with(density) { 12.dp.roundToPx() }
+            val width = with(density) { 296.dp.roundToPx() }
+            val height = with(density) { 372.dp.roundToPx() }
+            val position = anchorPosition(AppState.loadMainAnchor(), bounds, width, height, margin)
+            window.setLocation(position.x, position.y)
+        }
         DisposableEffect(window) {
             val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
             val listener = PropertyChangeListener { event ->
@@ -179,26 +232,88 @@ fun main() = application {
             focusManager.addPropertyChangeListener(listener)
             onDispose { focusManager.removePropertyChangeListener(listener) }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        window.setLocation(
-                            window.x + dragAmount.x.roundToInt(),
-                            window.y + dragAmount.y.roundToInt(),
-                        )
-                    }
+        var dragBase by remember { mutableStateOf<Point?>(null) }
+        var dragDelta by remember { mutableStateOf(Offset.Zero) }
+        val headerDrag = Modifier.pointerInput(Unit) {
+            detectDragGestures(
+                onDragStart = {
+                    dragBase = Point(window.x, window.y)
+                    dragDelta = Offset.Zero
                 },
-        ) {
-            CompactView(viewModel)
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    val base = dragBase ?: return@detectDragGestures
+                    dragDelta += dragAmount
+                    val scale = density.density
+                    window.setLocation(
+                        base.x + (dragDelta.x * scale).roundToInt(),
+                        base.y + (dragDelta.y * scale).roundToInt(),
+                    )
+                },
+                onDragEnd = { dragBase = null },
+                onDragCancel = { dragBase = null },
+            )
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            CompactView(
+                viewModel = viewModel,
+                headerDrag = headerDrag,
+                onOpenSettings = { showSettingsWindow() },
+            )
+        }
+    }
+
+    SwingDialog(
+        onCloseRequest = { dismissNotification() },
+        state = rememberDialogState(size = DpSize(296.dp, 148.dp)),
+        visible = notifyVisible,
+        title = "Pray Time",
+        icon = null,
+        decoration = WindowDecoration.Undecorated(0.dp),
+        transparent = true,
+        resizable = false,
+        enabled = true,
+        focusable = false,
+        alwaysOnTop = true,
+        onPreviewKeyEvent = { false },
+        onKeyEvent = { false },
+        modalityType = java.awt.Dialog.ModalityType.MODELESS,
+        init = { dialog ->
+            // Utility windows are skipped by the taskbar, pager and alt-tab.
+            runCatching { dialog.type = java.awt.Window.Type.UTILITY }
+        },
+    ) {
+        TransparentWindowBackground(window)
+        val density = LocalDensity.current
+        LaunchedEffect(notifyVisible) {
+            if (!notifyVisible) return@LaunchedEffect
+            val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .defaultScreenDevice.defaultConfiguration.bounds
+            val margin = with(density) { 12.dp.roundToPx() }
+            val width = with(density) { 296.dp.roundToPx() }
+            val height = with(density) { 148.dp.roundToPx() }
+            val position = anchorPosition(AppState.loadReminderAnchor(), bounds, width, height, margin)
+            // AWT centers the dialog when it becomes visible, so keep overriding
+            // for a few frames until it settles at the chosen anchor.
+            repeat(5) {
+                window.setLocation(position.x, position.y)
+                withFrameNanos { }
+            }
+        }
+        Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+            notifyPrayer?.let { prayer ->
+                PrayerNotification(
+                    prayer = prayer,
+                    onPrayed = { viewModel.markPrayed(prayer, true) },
+                    onDismiss = { dismissNotification() },
+                )
+            }
         }
     }
 
     SwingDialog(
         onCloseRequest = { menuVisible = false },
-        state = rememberDialogState(size = DpSize(184.dp, 112.dp)),
+        state = rememberDialogState(size = DpSize(184.dp, 136.dp)),
         visible = menuVisible,
         title = "Pray Time Menu",
         icon = null,
@@ -248,11 +363,72 @@ fun main() = application {
                     toggleCompact()
                 }
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                MenuRow("Settings") {
+                    menuVisible = false
+                    showSettingsWindow()
+                }
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                 MenuRow("Quit") {
                     menuVisible = false
                     quit()
                 }
             }
+        }
+    }
+
+    SwingDialog(
+        onCloseRequest = { settingsVisible = false },
+        state = rememberDialogState(size = DpSize(296.dp, 560.dp)),
+        visible = settingsVisible,
+        title = "Pray Time Settings",
+        icon = null,
+        decoration = WindowDecoration.Undecorated(0.dp),
+        transparent = true,
+        resizable = false,
+        enabled = true,
+        focusable = true,
+        alwaysOnTop = true,
+        onPreviewKeyEvent = { false },
+        onKeyEvent = { false },
+        modalityType = java.awt.Dialog.ModalityType.MODELESS,
+        init = { dialog ->
+            // Utility windows are skipped by the taskbar, pager and alt-tab.
+            runCatching { dialog.type = java.awt.Window.Type.UTILITY }
+        },
+    ) {
+        TransparentWindowBackground(window)
+        val density = LocalDensity.current
+        LaunchedEffect(Unit) {
+            val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .defaultScreenDevice.defaultConfiguration.bounds
+            val width = with(density) { 296.dp.roundToPx() }
+            val height = with(density) { 560.dp.roundToPx() }
+            // AWT centers the dialog when it becomes visible, so keep overriding
+            // for a few frames until it settles centered on the screen.
+            repeat(5) {
+                window.setLocation(bounds.x + (bounds.width - width) / 2, bounds.y + (bounds.height - height) / 2)
+                withFrameNanos { }
+            }
+        }
+        DisposableEffect(window) {
+            val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            val listener = PropertyChangeListener { event ->
+                if (event.propertyName != "activeWindow") return@PropertyChangeListener
+                if (event.newValue == window) {
+                    settingsHadFocus = true
+                } else if (settingsHadFocus && System.currentTimeMillis() >= settingsSuppressUntil) {
+                    settingsHadFocus = false
+                    settingsVisible = false
+                }
+            }
+            focusManager.addPropertyChangeListener(listener)
+            onDispose { focusManager.removePropertyChangeListener(listener) }
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            SettingsView(
+                viewModel = viewModel,
+                onClose = { settingsVisible = false },
+            )
         }
     }
 }
