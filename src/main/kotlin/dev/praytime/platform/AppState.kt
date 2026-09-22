@@ -1,6 +1,7 @@
 package dev.praytime.platform
 
 import dev.praytime.domain.Region
+import dev.praytime.ui.ReminderController
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -48,6 +49,13 @@ object AppState {
     fun loadReminderEnabled(): Boolean = readField("reminder.enabled") != "false"
 
     fun saveReminderEnabled(enabled: Boolean) = writeField("reminder.enabled", enabled.toString())
+
+    fun loadReminderMinutes(): Int =
+        readField("reminder.minutes")?.toIntOrNull()?.takeIf { it in MIN_REMINDER_MINUTES..MAX_REMINDER_MINUTES }
+            ?: ReminderController.DEFAULT_REMINDER_MINUTES
+
+    fun saveReminderMinutes(minutes: Int) =
+        writeField("reminder.minutes", minutes.coerceIn(MIN_REMINDER_MINUTES, MAX_REMINDER_MINUTES).toString())
 
     fun loadMainAnchor(): WindowAnchor = loadAnchor("main.anchor")
 
@@ -125,4 +133,7 @@ object AppState {
     }
 
     private const val RECENT_LIMIT = 10
+
+    const val MIN_REMINDER_MINUTES = 1
+    const val MAX_REMINDER_MINUTES = 120
 }

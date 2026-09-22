@@ -32,8 +32,7 @@ class ReminderControllerTest {
     private val asr = PrayerTime("Asr", Instant.parse("2026-09-21T06:30:00Z"), "UTC")
     private val maghrib = PrayerTime("Maghrib", Instant.parse("2026-09-21T12:00:00Z"), "UTC")
 
-    private fun controller(): ReminderController =
-        ReminderController(reminderInterval = Duration.ofMinutes(10), clock = clock)
+    private fun controller(): ReminderController = ReminderController(clock = clock)
 
     @Test
     fun showsNotificationWhenPrayerBecomesDue() {
@@ -53,12 +52,26 @@ class ReminderControllerTest {
     }
 
     @Test
-    fun dismissSnoozesUntilIntervalElapsesWhenReminderEnabled() {
+    fun dismissUsesDefaultTenMinuteSnooze() {
         val controller = controller()
         controller.onTick(asr, reminderEnabled = true)
         controller.dismiss(reminderEnabled = true)
         assertFalse(controller.visible)
         clock.advanceBy(Duration.ofMinutes(9))
+        controller.onTick(asr, reminderEnabled = true)
+        assertFalse(controller.visible)
+        clock.advanceBy(Duration.ofMinutes(1))
+        controller.onTick(asr, reminderEnabled = true)
+        assertTrue(controller.visible)
+    }
+
+    @Test
+    fun dismissUsesCustomMinutesSnooze() {
+        val controller = controller()
+        controller.onTick(asr, reminderEnabled = true)
+        controller.dismiss(reminderEnabled = true, reminderMinutes = 2)
+        assertFalse(controller.visible)
+        clock.advanceBy(Duration.ofMinutes(1))
         controller.onTick(asr, reminderEnabled = true)
         assertFalse(controller.visible)
         clock.advanceBy(Duration.ofMinutes(1))

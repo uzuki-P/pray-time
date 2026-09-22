@@ -12,7 +12,6 @@ internal fun latestDuePrayer(day: DayPrayerTimes, completed: Set<Instant>, now: 
         .maxByOrNull { it.instant }
 
 class ReminderController(
-    private val reminderInterval: Duration = Duration.ofMinutes(10),
     private val clock: Clock = Clock.systemDefaultZone(),
 ) {
     var visible: Boolean = false
@@ -46,12 +45,16 @@ class ReminderController(
         }
     }
 
-    fun dismiss(reminderEnabled: Boolean) {
+    fun dismiss(reminderEnabled: Boolean, reminderMinutes: Int = DEFAULT_REMINDER_MINUTES) {
         visible = false
         if (reminderEnabled) {
-            snoozedUntil = clock.instant().plus(reminderInterval)
+            snoozedUntil = clock.instant().plus(Duration.ofMinutes(reminderMinutes.toLong()))
         } else {
             current?.let { dismissedPermanently += it.instant }
         }
+    }
+
+    companion object {
+        const val DEFAULT_REMINDER_MINUTES = 10
     }
 }

@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -108,9 +109,17 @@ fun main() = application {
     val reminderController = remember { ReminderController() }
     var notifyVisible by remember { mutableStateOf(false) }
     var notifyPrayer by remember { mutableStateOf<PrayerTime?>(null) }
+    var testReminderVisible by remember { mutableStateOf(false) }
+    var testReminderPrayer by remember { mutableStateOf<PrayerTime?>(null) }
     val dismissNotification = {
-        reminderController.dismiss(AppState.loadReminderEnabled())
+        reminderController.dismiss(AppState.loadReminderEnabled(), AppState.loadReminderMinutes())
         notifyVisible = false
+    }
+    val showTestReminder = {
+        val day = viewModel.dayTimes.value
+        val now = viewModel.now()
+        testReminderPrayer = latestDuePrayer(day, emptySet(), now) ?: day.next(now) ?: day.times.last()
+        testReminderVisible = true
     }
 
     LaunchedEffect(viewModel) {
@@ -263,10 +272,11 @@ fun main() = application {
         }
     }
 
+    val showNotification = notifyVisible || testReminderVisible
     SwingDialog(
-        onCloseRequest = { dismissNotification() },
+        onCloseRequest = { if (testReminderVisible) testReminderVisible = false else dismissNotification() },
         state = rememberDialogState(size = DpSize(296.dp, 148.dp)),
-        visible = notifyVisible,
+        visible = showNotification,
         title = "Pray Time",
         icon = null,
         decoration = WindowDecoration.Undecorated(0.dp),
@@ -285,8 +295,8 @@ fun main() = application {
     ) {
         TransparentWindowBackground(window)
         val density = LocalDensity.current
-        LaunchedEffect(notifyVisible) {
-            if (!notifyVisible) return@LaunchedEffect
+        LaunchedEffect(showNotification) {
+            if (!showNotification) return@LaunchedEffect
             val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                 .defaultScreenDevice.defaultConfiguration.bounds
             val margin = with(density) { 12.dp.roundToPx() }
@@ -301,12 +311,28 @@ fun main() = application {
             }
         }
         Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-            notifyPrayer?.let { prayer ->
-                PrayerNotification(
-                    prayer = prayer,
-                    onPrayed = { viewModel.markPrayed(prayer, true) },
-                    onDismiss = { dismissNotification() },
-                )
+            val prayer = if (testReminderVisible) testReminderPrayer else notifyPrayer
+            if (showNotification) {
+                prayer?.let { current ->
+                    // Fresh animation state on every show: SwingDialog keeps the
+                    // hidden dialog's composition (and its remember state) alive,
+                    // so stale flags would leave the buttons permanently busy.
+                    key(showNotification, current.instant) {
+                        if (testReminderVisible) {
+                            PrayerNotification(
+                                prayer = current,
+                                onPrayed = { testReminderVisible = false },
+                                onDismiss = { testReminderVisible = false },
+                            )
+                        } else {
+                            PrayerNotification(
+                                prayer = current,
+                                onPrayed = { viewModel.markPrayed(current, true) },
+                                onDismiss = { dismissNotification() },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -378,7 +404,7 @@ fun main() = application {
 
     SwingDialog(
         onCloseRequest = { settingsVisible = false },
-        state = rememberDialogState(size = DpSize(296.dp, 560.dp)),
+        state = rememberDialogState(size = DpSize(296.dp, 680.dp)),
         visible = settingsVisible,
         title = "Pray Time Settings",
         icon = null,
@@ -402,7 +428,7 @@ fun main() = application {
             val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                 .defaultScreenDevice.defaultConfiguration.bounds
             val width = with(density) { 296.dp.roundToPx() }
-            val height = with(density) { 560.dp.roundToPx() }
+            val height = with(density) { 680.dp.roundToPx() }
             // AWT centers the dialog when it becomes visible, so keep overriding
             // for a few frames until it settles centered on the screen.
             repeat(5) {
@@ -428,6 +454,7 @@ fun main() = application {
             SettingsView(
                 viewModel = viewModel,
                 onClose = { settingsVisible = false },
+                onTestReminder = showTestReminder,
             )
         }
     }

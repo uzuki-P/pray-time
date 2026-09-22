@@ -8,6 +8,7 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,14 +59,20 @@ fun PrayerNotification(
     var shaking by remember { mutableStateOf(false) }
     val pop = remember { Animatable(1f) }
     val shake = remember { Animatable(0f) }
+    val burst = remember { Animatable(1f) }
     val busy = celebrating || shaking
 
     fun celebrate() {
         if (busy) return
         celebrating = true
         scope.launch {
-            pop.animateTo(1.06f, tween(110, easing = FastOutSlowInEasing))
+            burst.snapTo(0f)
+            launch { burst.animateTo(1f, tween(420, easing = FastOutSlowInEasing)) }
+            pop.animateTo(1.08f, tween(110, easing = FastOutSlowInEasing))
             pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow))
+            // Reset before the callback: the dialog keeps this composition alive
+            // while hidden, so leftover state would dead-lock the next reminder.
+            celebrating = false
             onPrayed()
         }
     }
@@ -87,6 +94,7 @@ fun PrayerNotification(
                     0f at 420
                 },
             )
+            shaking = false
             onDismiss()
         }
     }
@@ -158,25 +166,40 @@ fun PrayerNotification(
                 color = Color.White.copy(alpha = 0.65f),
             )
             Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (celebrating) prayedGreenBright else prayedGreen)
-                    .clickable(onClick = ::celebrate)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    "✓",
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black),
-                    color = prayedGreenText,
-                )
-                Text(
-                    "Mark prayed",
-                    style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                    color = prayedGreenText,
-                )
+            Box {
+                if (burst.value > 0f && burst.value < 1f) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .graphicsLayer {
+                                val grow = 1f + 0.22f * burst.value
+                                scaleX = grow
+                                scaleY = grow
+                                alpha = 1f - burst.value
+                            }
+                            .border(2.dp, prayedGreenBright, RoundedCornerShape(12.dp)),
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (celebrating) prayedGreenBright else prayedGreen)
+                        .clickable(onClick = ::celebrate)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "✓",
+                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black),
+                        color = prayedGreenText,
+                    )
+                    Text(
+                        "Mark prayed",
+                        style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        color = prayedGreenText,
+                    )
+                }
             }
         }
     }
