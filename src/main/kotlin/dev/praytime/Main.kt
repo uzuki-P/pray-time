@@ -185,6 +185,13 @@ fun main() = application {
     val isLinux = System.getProperty("os.name").lowercase().contains("linux")
 
     if (isLinux) {
+        LaunchedEffect(Unit) {
+            // Off the UI thread so the first drag does not wait on JNA startup.
+            launch(Dispatchers.IO) { LinuxWindowMover.warmUp() }
+        }
+    }
+
+    if (isLinux) {
         DisposableEffect(Unit) {
             fun onEdt(block: () -> Unit) {
                 java.awt.EventQueue.invokeLater(block)
