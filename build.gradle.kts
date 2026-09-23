@@ -29,6 +29,9 @@ dependencies {
     implementation("com.github.hypfvieh:dbus-java-core:5.2.1")
     implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.2.1")
     implementation("org.xerial:sqlite-jdbc:3.53.4.0")
+    // JNA talks to Xlib so the WM can run undecorated-window drags natively.
+    implementation("net.java.dev.jna:jna:5.17.0")
+    implementation("net.java.dev.jna:jna-platform:5.17.0")
     // Provides Dispatchers.Main (EDT) on desktop; required by ComposeNativeTray's Windows tray thread.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.11.0")
     testImplementation(kotlin("test"))
@@ -45,7 +48,7 @@ compose.desktop {
         mainClass = "dev.praytime.MainKt"
 
         nativeDistributions {
-            modules("jdk.security.auth", "java.sql")
+            modules("jdk.security.auth", "java.sql", "jdk.unsupported")
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
             packageName = "pray-time"
             packageVersion = "0.1.1"

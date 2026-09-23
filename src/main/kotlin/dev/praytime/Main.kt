@@ -49,6 +49,7 @@ import dev.praytime.domain.medanJohor
 import dev.praytime.platform.AppState
 import dev.praytime.platform.Autostart
 import dev.praytime.platform.LinuxSniTray
+import dev.praytime.platform.LinuxWindowMover
 import dev.praytime.resources.Res
 import dev.praytime.resources.pray_time_app_dark
 import dev.praytime.resources.pray_time_app_light
@@ -253,14 +254,21 @@ fun main() = application {
         }
         var dragBase by remember { mutableStateOf<Point?>(null) }
         var dragDelta by remember { mutableStateOf(Offset.Zero) }
+        var wmMoving by remember { mutableStateOf(false) }
         val headerDrag = Modifier.pointerInput(Unit) {
             detectDragGestures(
                 onDragStart = {
-                    dragBase = Point(window.x, window.y)
-                    dragDelta = Offset.Zero
+                    // setLocation dragging jitters under XWayland; the WM's own
+                    // move tracks the pointer per-frame, so prefer it there.
+                    wmMoving = isLinux && LinuxWindowMover.requestInteractiveMove(window)
+                    if (!wmMoving) {
+                        dragBase = Point(window.x, window.y)
+                        dragDelta = Offset.Zero
+                    }
                 },
                 onDrag = { change, dragAmount ->
                     change.consume()
+                    if (wmMoving) return@detectDragGestures
                     val base = dragBase ?: return@detectDragGestures
                     dragDelta += dragAmount
                     val scale = density.density
@@ -269,8 +277,8 @@ fun main() = application {
                         base.y + (dragDelta.y * scale).roundToInt(),
                     )
                 },
-                onDragEnd = { dragBase = null },
-                onDragCancel = { dragBase = null },
+                onDragEnd = { dragBase = null; wmMoving = false },
+                onDragCancel = { dragBase = null; wmMoving = false },
             )
         }
         CompositionLocalProvider(LocalAppPalette provides palette) {
