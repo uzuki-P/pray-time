@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -59,12 +58,17 @@ import dev.praytime.calculation.PrayerTime
 import dev.praytime.platform.WindowAnchor
 import dev.praytime.platform.anchorPosition
 import dev.praytime.ui.CompactView
+import dev.praytime.ui.DarkPalette
+import dev.praytime.ui.LightPalette
+import dev.praytime.ui.LocalAppPalette
 import dev.praytime.ui.PrayerNotification
 import dev.praytime.ui.ReminderController
 import dev.praytime.ui.ScheduleViewModel
 import dev.praytime.ui.SettingsView
-import dev.praytime.ui.cardSurface
+import dev.praytime.ui.ThemeMode
 import dev.praytime.ui.latestDuePrayer
+import dev.praytime.ui.rememberSystemThemeIsDark
+import dev.praytime.ui.themeIsDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -87,7 +91,13 @@ fun main() = application {
     var settingsSuppressUntil by remember { mutableStateOf(0L) }
     var settingsHadFocus by remember { mutableStateOf(false) }
 
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme by rememberSystemThemeIsDark()
+    var themeMode by remember { mutableStateOf(AppState.loadThemeMode()) }
+    val setThemeMode = { mode: ThemeMode ->
+        themeMode = mode
+        AppState.saveThemeMode(mode)
+    }
+    val palette = if (themeIsDark(themeMode, darkTheme)) DarkPalette else LightPalette
     val appIcon = if (darkTheme) {
         painterResource(Res.drawable.pray_time_app_dark)
     } else {
@@ -263,12 +273,14 @@ fun main() = application {
                 onDragCancel = { dragBase = null },
             )
         }
-        Box(modifier = Modifier.fillMaxSize()) {
-            CompactView(
-                viewModel = viewModel,
-                headerDrag = headerDrag,
-                onOpenSettings = { showSettingsWindow() },
-            )
+        CompositionLocalProvider(LocalAppPalette provides palette) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                CompactView(
+                    viewModel = viewModel,
+                    headerDrag = headerDrag,
+                    onOpenSettings = { showSettingsWindow() },
+                )
+            }
         }
     }
 
@@ -310,26 +322,28 @@ fun main() = application {
                 withFrameNanos { }
             }
         }
-        Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-            val prayer = if (testReminderVisible) testReminderPrayer else notifyPrayer
-            if (showNotification) {
-                prayer?.let { current ->
-                    // Fresh animation state on every show: SwingDialog keeps the
-                    // hidden dialog's composition (and its remember state) alive,
-                    // so stale flags would leave the buttons permanently busy.
-                    key(showNotification, current.instant) {
-                        if (testReminderVisible) {
-                            PrayerNotification(
-                                prayer = current,
-                                onPrayed = { testReminderVisible = false },
-                                onDismiss = { testReminderVisible = false },
-                            )
-                        } else {
-                            PrayerNotification(
-                                prayer = current,
-                                onPrayed = { viewModel.markPrayed(current, true) },
-                                onDismiss = { dismissNotification() },
-                            )
+        CompositionLocalProvider(LocalAppPalette provides palette) {
+            Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                val prayer = if (testReminderVisible) testReminderPrayer else notifyPrayer
+                if (showNotification) {
+                    prayer?.let { current ->
+                        // Fresh animation state on every show: SwingDialog keeps the
+                        // hidden dialog's composition (and its remember state) alive,
+                        // so stale flags would leave the buttons permanently busy.
+                        key(showNotification, current.instant) {
+                            if (testReminderVisible) {
+                                PrayerNotification(
+                                    prayer = current,
+                                    onPrayed = { testReminderVisible = false },
+                                    onDismiss = { testReminderVisible = false },
+                                )
+                            } else {
+                                PrayerNotification(
+                                    prayer = current,
+                                    onPrayed = { viewModel.markPrayed(current, true) },
+                                    onDismiss = { dismissNotification() },
+                                )
+                            }
                         }
                     }
                 }
@@ -375,28 +389,30 @@ fun main() = application {
             focusManager.addPropertyChangeListener(listener)
             onDispose { focusManager.removePropertyChangeListener(listener) }
         }
-        Box(modifier = Modifier.fillMaxSize().padding(10.dp)) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .shadow(6.dp, RoundedCornerShape(14.dp))
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cardSurface)
-                    .padding(vertical = 4.dp),
-            ) {
-                MenuRow("Show / Hide popup") {
-                    menuVisible = false
-                    toggleCompact()
-                }
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                MenuRow("Settings") {
-                    menuVisible = false
-                    showSettingsWindow()
-                }
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                MenuRow("Quit") {
-                    menuVisible = false
-                    quit()
+        CompositionLocalProvider(LocalAppPalette provides palette) {
+            Box(modifier = Modifier.fillMaxSize().padding(10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(6.dp, RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(palette.surface)
+                        .padding(vertical = 4.dp),
+                ) {
+                    MenuRow("Show / Hide popup") {
+                        menuVisible = false
+                        toggleCompact()
+                    }
+                    HorizontalDivider(color = palette.divider)
+                    MenuRow("Settings") {
+                        menuVisible = false
+                        showSettingsWindow()
+                    }
+                    HorizontalDivider(color = palette.divider)
+                    MenuRow("Quit") {
+                        menuVisible = false
+                        quit()
+                    }
                 }
             }
         }
@@ -450,12 +466,16 @@ fun main() = application {
             focusManager.addPropertyChangeListener(listener)
             onDispose { focusManager.removePropertyChangeListener(listener) }
         }
-        Box(modifier = Modifier.fillMaxSize()) {
-            SettingsView(
-                viewModel = viewModel,
-                onClose = { settingsVisible = false },
-                onTestReminder = showTestReminder,
-            )
+        CompositionLocalProvider(LocalAppPalette provides palette) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                SettingsView(
+                    viewModel = viewModel,
+                    themeMode = themeMode,
+                    onThemeModeChange = setThemeMode,
+                    onClose = { settingsVisible = false },
+                    onTestReminder = showTestReminder,
+                )
+            }
         }
     }
 }
@@ -478,6 +498,7 @@ private fun TransparentWindowBackground(window: java.awt.Window) {
 
 @Composable
 private fun MenuRow(label: String, onClick: () -> Unit) {
+    val palette = LocalAppPalette.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -487,7 +508,7 @@ private fun MenuRow(label: String, onClick: () -> Unit) {
         Text(
             label,
             style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-            color = Color(0xFFE8E8FF),
+            color = palette.onSurface,
         )
     }
 }

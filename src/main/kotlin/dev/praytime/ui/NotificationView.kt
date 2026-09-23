@@ -54,6 +54,7 @@ fun PrayerNotification(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(20.dp)
+    val palette = LocalAppPalette.current
     val scope = rememberCoroutineScope()
     var celebrating by remember { mutableStateOf(false) }
     var shaking by remember { mutableStateOf(false) }
@@ -100,7 +101,7 @@ fun PrayerNotification(
     }
 
     val closeTint by animateColorAsState(
-        targetValue = if (shaking) dueAmber else Color.White.copy(alpha = 0.75f),
+        targetValue = if (shaking) dueAmber else palette.onSurface.copy(alpha = 0.75f),
         label = "closeTint",
     )
 
@@ -115,7 +116,7 @@ fun PrayerNotification(
                 }
                 .shadow(6.dp, shape)
                 .clip(shape)
-                .background(cardSurface)
+                .background(palette.surface)
                 .padding(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -129,7 +130,7 @@ fun PrayerNotification(
                 Text(
                     prayer.name,
                     style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold),
-                    color = Color.White,
+                    color = palette.onSurface,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -141,14 +142,14 @@ fun PrayerNotification(
                 Text(
                     prayer.displayTime,
                     style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = palette.onSurface.copy(alpha = 0.6f),
                 )
                 Spacer(Modifier.width(10.dp))
                 Box(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.1f))
+                        .background(palette.onSurface.copy(alpha = 0.1f))
                         .clickable(onClick = ::reluctantDismiss),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -163,7 +164,7 @@ fun PrayerNotification(
             Text(
                 "Time to pray ${prayer.name}.",
                 style = TextStyle(fontSize = 11.sp),
-                color = Color.White.copy(alpha = 0.65f),
+                color = palette.onSurface.copy(alpha = 0.65f),
             )
             Spacer(Modifier.height(12.dp))
             Box {

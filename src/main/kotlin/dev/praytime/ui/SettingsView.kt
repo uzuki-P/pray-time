@@ -43,7 +43,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -75,6 +74,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
+private fun ThemeMode.label(): String = when (this) {
+    ThemeMode.SYSTEM -> "System"
+    ThemeMode.DARK -> "Dark"
+    ThemeMode.LIGHT -> "Light"
+}
+
 private fun WindowAnchor.label(): String = when (this) {
     WindowAnchor.TOP_LEFT -> "Top left"
     WindowAnchor.TOP_RIGHT -> "Top right"
@@ -87,11 +92,14 @@ private fun WindowAnchor.label(): String = when (this) {
 @Composable
 fun SettingsView(
     viewModel: ScheduleViewModel,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onClose: () -> Unit,
     onTestReminder: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val dayTimes by viewModel.dayTimes.collectAsState()
+    val palette = LocalAppPalette.current
     val shape = RoundedCornerShape(20.dp)
     val listScrollState = rememberScrollState()
 
@@ -136,28 +144,28 @@ fun SettingsView(
                 .width(272.dp)
                 .shadow(6.dp, shape)
                 .clip(shape)
-                .background(cardSurface)
+                .background(palette.surface)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "SETTINGS",
                     style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp),
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = palette.onSurface.copy(alpha = 0.7f),
                 )
                 Spacer(Modifier.weight(1f))
                 Box(
                     modifier = Modifier
                         .size(24.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.1f))
+                        .background(palette.onSurface.copy(alpha = 0.1f))
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         "✕",
                         style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black),
-                        color = Color.White.copy(alpha = 0.75f),
+                        color = palette.onSurface.copy(alpha = 0.75f),
                     )
                 }
             }
@@ -184,7 +192,7 @@ fun SettingsView(
                         Text(
                             "No region matches \"$q\"",
                             style = TextStyle(fontSize = 11.sp),
-                            color = Color.White.copy(alpha = 0.35f),
+                            color = palette.onSurface.copy(alpha = 0.35f),
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                         )
                     } else {
@@ -228,12 +236,39 @@ fun SettingsView(
                 Autostart.setEnabled(!autostartEnabled)
                 autostartEnabled = Autostart.isEnabled()
             }
+            Spacer(Modifier.height(8.dp))
+            SectionLabel("APPEARANCE")
+            PickerLabel("Theme")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(ThemeMode.SYSTEM, ThemeMode.DARK, ThemeMode.LIGHT).forEach { mode ->
+                    val isSelected = mode == themeMode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(24.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) palette.accent else palette.onSurface.copy(alpha = 0.08f))
+                            .clickable { onThemeModeChange(mode) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            mode.label(),
+                            style = TextStyle(
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            ),
+                            color = if (isSelected) palette.onAccent else palette.onSurface.copy(alpha = 0.75f),
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, onToggle: () -> Unit) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -244,7 +279,7 @@ private fun ToggleRow(label: String, checked: Boolean, onToggle: () -> Unit) {
         Text(
             label,
             style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-            color = Color.White.copy(alpha = 0.75f),
+            color = palette.onSurface.copy(alpha = 0.75f),
             modifier = Modifier.weight(1f),
         )
         CheckCircle(done = checked, size = 16.dp, iconSize = 10.sp, onClick = onToggle)
@@ -253,16 +288,18 @@ private fun ToggleRow(label: String, checked: Boolean, onToggle: () -> Unit) {
 
 @Composable
 private fun PickerLabel(text: String) {
+    val palette = LocalAppPalette.current
     Text(
         text,
         style = TextStyle(fontSize = 10.sp),
-        color = Color.White.copy(alpha = 0.45f),
+        color = palette.onSurface.copy(alpha = 0.45f),
         modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 3.dp),
     )
 }
 
 @Composable
 private fun AnchorGrid(selected: WindowAnchor, onSelect: (WindowAnchor) -> Unit) {
+    val palette = LocalAppPalette.current
     val rows = listOf(
         listOf(WindowAnchor.TOP_LEFT, WindowAnchor.TOP_RIGHT),
         listOf(WindowAnchor.MIDDLE_LEFT, WindowAnchor.MIDDLE_RIGHT),
@@ -278,7 +315,7 @@ private fun AnchorGrid(selected: WindowAnchor, onSelect: (WindowAnchor) -> Unit)
                             .weight(1f)
                             .height(24.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) Color(0xFF9D8CFF) else Color.White.copy(alpha = 0.08f))
+                            .background(if (isSelected) palette.accent else palette.onSurface.copy(alpha = 0.08f))
                             .clickable { onSelect(anchor) },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -288,7 +325,7 @@ private fun AnchorGrid(selected: WindowAnchor, onSelect: (WindowAnchor) -> Unit)
                                 fontSize = 10.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             ),
-                            color = if (isSelected) Color(0xFF15152B) else Color.White.copy(alpha = 0.75f),
+                            color = if (isSelected) palette.onAccent else palette.onSurface.copy(alpha = 0.75f),
                         )
                     }
                 }
@@ -299,16 +336,18 @@ private fun AnchorGrid(selected: WindowAnchor, onSelect: (WindowAnchor) -> Unit)
 
 @Composable
 private fun SectionLabel(label: String) {
+    val palette = LocalAppPalette.current
     Text(
         label,
         style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-        color = Color.White.copy(alpha = 0.4f),
+        color = palette.onSurface.copy(alpha = 0.4f),
         modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
     )
 }
 
 @Composable
 private fun RegionRows(regions: List<Region>, selected: Region, onSelect: (Region) -> Unit) {
+    val palette = LocalAppPalette.current
     regions.forEach { region ->
         val isSelected = region == selected
         Row(
@@ -322,13 +361,13 @@ private fun RegionRows(regions: List<Region>, selected: Region, onSelect: (Regio
                 modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = if (isSelected) 0.7f else 0.2f)),
+                    .background(palette.onSurface.copy(alpha = if (isSelected) 0.7f else 0.2f)),
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 region.displayName,
                 style = TextStyle(fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium),
-                color = Color.White.copy(alpha = if (isSelected) 1f else 0.75f),
+                color = palette.onSurface.copy(alpha = if (isSelected) 1f else 0.75f),
                 modifier = Modifier.weight(1f).padding(vertical = 3.dp),
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
@@ -341,6 +380,7 @@ private fun RegionRows(regions: List<Region>, selected: Region, onSelect: (Regio
 
 @Composable
 private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
+    val palette = LocalAppPalette.current
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(TextFieldValue(minutes.toString())) }
     var fieldHadFocus by remember { mutableStateOf(false) }
@@ -378,7 +418,7 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
                 .weight(1f)
                 .height(24.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF9D8CFF))
+                .background(palette.accent)
                 .clickable(enabled = !editing) { beginEdit() },
             contentAlignment = Alignment.Center,
         ) {
@@ -394,10 +434,10 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
                     textStyle = TextStyle(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF15152B),
+                        color = palette.onAccent,
                         textAlign = TextAlign.Center,
                     ),
-                    cursorBrush = SolidColor(Color(0xFF15152B)),
+                    cursorBrush = SolidColor(palette.onAccent),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -424,7 +464,7 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
                 Text(
                     "$minutes min",
                     style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                    color = Color(0xFF15152B),
+                    color = palette.onAccent,
                 )
             }
         }
@@ -434,45 +474,48 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
 
 @Composable
 private fun StepperTile(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    val palette = LocalAppPalette.current
     Box(
         modifier = Modifier
             .width(40.dp)
             .height(24.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = if (enabled) 0.08f else 0.04f))
+            .background(palette.onSurface.copy(alpha = if (enabled) 0.08f else 0.04f))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             symbol,
             style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Black),
-            color = Color.White.copy(alpha = if (enabled) 0.75f else 0.25f),
+            color = palette.onSurface.copy(alpha = if (enabled) 0.75f else 0.25f),
         )
     }
 }
 
 @Composable
 private fun TestReminderRow(onClick: () -> Unit) {
+    val palette = LocalAppPalette.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 6.dp)
             .height(24.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.08f))
+            .background(palette.onSurface.copy(alpha = 0.08f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             "Test due reminder notification",
             style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium),
-            color = Color.White.copy(alpha = 0.75f),
+            color = palette.onSurface.copy(alpha = 0.75f),
         )
     }
 }
 
 @Composable
 private fun Scrollbar(scrollState: ScrollState, modifier: Modifier = Modifier) {
+    val palette = LocalAppPalette.current
     val scope = rememberCoroutineScope()
     val minThumbPx = with(LocalDensity.current) { 24.dp.toPx() }
     var trackHeight by remember { mutableFloatStateOf(0f) }
@@ -503,7 +546,7 @@ private fun Scrollbar(scrollState: ScrollState, modifier: Modifier = Modifier) {
         val travel = (track - thumb).coerceAtLeast(1f)
         val fraction = scrollState.value / maxValue
         drawRoundRect(
-            color = Color.White.copy(alpha = 0.22f),
+            color = palette.onSurface.copy(alpha = 0.22f),
             topLeft = Offset(size.width - 4.dp.toPx(), pad + travel * fraction),
             size = Size(3.dp.toPx(), thumb),
             cornerRadius = CornerRadius(1.5.dp.toPx()),
@@ -513,16 +556,17 @@ private fun Scrollbar(scrollState: ScrollState, modifier: Modifier = Modifier) {
 
 @Composable
 private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
+    val palette = LocalAppPalette.current
     BasicTextField(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
-        textStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White),
-        cursorBrush = SolidColor(Color(0xFF9D8CFF)),
+        textStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.onSurface),
+        cursorBrush = SolidColor(palette.accent),
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.08f))
+            .background(palette.onSurface.copy(alpha = 0.08f))
             .padding(horizontal = 10.dp, vertical = 7.dp),
         decorationBox = { inner ->
             Box {
@@ -530,7 +574,7 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
                     Text(
                         "Search region…",
                         style = TextStyle(fontSize = 12.sp),
-                        color = Color.White.copy(alpha = 0.35f),
+                        color = palette.onSurface.copy(alpha = 0.35f),
                     )
                 }
                 inner()

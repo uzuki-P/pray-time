@@ -65,8 +65,6 @@ internal val prayerColors = mapOf(
     "Isha" to Color(0xFF5A6FE0),
 )
 
-internal val cardSurface = Color(0xFF15152B)
-
 internal fun minuteFraction(instant: Instant, zone: ZoneId): Float =
     LocalTime.ofInstant(instant, zone).toSecondOfDay() / 86_400f
 
@@ -109,6 +107,7 @@ fun CompactView(
     val next = countdown.nextPrayer
     val sky = skyTheme(dayTimes, now)
     val latestDue = latestDuePrayer(dayTimes, completed, now)
+    val palette = LocalAppPalette.current
     val shape = RoundedCornerShape(20.dp)
 
     Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
@@ -117,7 +116,7 @@ fun CompactView(
                 .width(272.dp)
                 .shadow(6.dp, shape)
                 .clip(shape)
-                .background(cardSurface),
+                .background(palette.surface),
         ) {
             Column(
                 modifier = Modifier
@@ -172,7 +171,7 @@ fun CompactView(
                         Text(
                             prayer.name,
                             style = TextStyle(fontSize = 13.sp, fontWeight = if (isNext) FontWeight.Bold else FontWeight.Medium),
-                            color = Color.White.copy(alpha = if (done) 0.4f else 1f),
+                            color = palette.onSurface.copy(alpha = if (done) 0.4f else 1f),
                             textDecoration = if (done) TextDecoration.LineThrough else null,
                             modifier = Modifier.weight(1f),
                         )
@@ -187,7 +186,7 @@ fun CompactView(
                         Text(
                             prayer.displayTime,
                             style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                            color = Color.White.copy(alpha = if (done) 0.4f else 0.9f),
+                            color = palette.onSurface.copy(alpha = if (done) 0.4f else 0.9f),
                         )
                         Spacer(Modifier.width(8.dp))
                         CheckCircle(
@@ -212,13 +211,13 @@ fun CompactView(
                 Text(
                     dayTimes.region.displayName,
                     style = TextStyle(fontSize = 10.sp),
-                    color = Color.White.copy(alpha = 0.45f),
+                    color = palette.onSurface.copy(alpha = 0.45f),
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     "SETTINGS",
                     style = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-                    color = Color(0xFF9D8CFF),
+                    color = palette.accent,
                 )
             }
         }
@@ -234,6 +233,7 @@ internal fun CheckCircle(
     onClick: () -> Unit,
 ) {
     val prayedGreen = Color(0xFF3EDC81)
+    val palette = LocalAppPalette.current
     val pop = remember { Animatable(1f) }
     val burst = remember { Animatable(0f) }
     var wasDone by remember { mutableStateOf(done) }
@@ -249,7 +249,7 @@ internal fun CheckCircle(
     val fill by animateColorAsState(
         targetValue = when {
             done -> prayedGreen
-            !enabled -> Color.White.copy(alpha = 0.06f)
+            !enabled -> palette.onSurface.copy(alpha = 0.06f)
             else -> Color.Transparent
         },
         label = "checkFill",
@@ -275,7 +275,7 @@ internal fun CheckCircle(
                 }
                 .clip(CircleShape)
                 .background(fill)
-                .border(1.5.dp, Color.White.copy(alpha = if (enabled) 0.3f else 0.12f), CircleShape)
+                .border(1.5.dp, palette.onSurface.copy(alpha = if (enabled) 0.3f else 0.12f), CircleShape)
                 .clickable(enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -288,7 +288,7 @@ internal fun CheckCircle(
                 !enabled -> Box(
                     modifier = Modifier
                         .size(width = 6.dp, height = 1.5.dp)
-                        .background(Color.White.copy(alpha = 0.25f)),
+                        .background(palette.onSurface.copy(alpha = 0.25f)),
                 )
             }
         }

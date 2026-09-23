@@ -2,6 +2,7 @@ package dev.praytime.platform
 
 import dev.praytime.domain.Region
 import dev.praytime.ui.ReminderController
+import dev.praytime.ui.ThemeMode
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -64,6 +65,11 @@ object AppState {
     fun loadReminderAnchor(): WindowAnchor = loadAnchor("reminder.anchor")
 
     fun saveReminderAnchor(anchor: WindowAnchor) = writeField("reminder.anchor", anchor.name)
+
+    fun loadThemeMode(): ThemeMode =
+        readField("theme")?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM
+
+    fun saveThemeMode(mode: ThemeMode) = writeField("theme", mode.name)
 
     private fun loadAnchor(key: String): WindowAnchor =
         readField(key)?.let { runCatching { WindowAnchor.valueOf(it) }.getOrNull() } ?: WindowAnchor.TOP_RIGHT

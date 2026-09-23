@@ -14,6 +14,7 @@ import org.freedesktop.dbus.interfaces.DBusInterface
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import org.freedesktop.dbus.Struct
+import org.freedesktop.dbus.Tuple
 import java.awt.image.BufferedImage
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicInteger
@@ -39,10 +40,13 @@ class MenuLayout(
     @field:Position(2) val children: List<Variant<MenuLayout>>,
 ) : Struct()
 
-class MenuLayoutResult(
-    @field:Position(0) val revision: UInt32,
-    @field:Position(1) val layout: MenuLayout,
-) : Struct()
+// Tuple, not Struct: GetLayout must return two separate out-args (u + (ia{sv}av)),
+// which is what Qt's DBusMenuImporter demarshals. A single Struct produces one
+// nested out-arg and Qt silently fails to read the layout, leaving the menu empty.
+class MenuLayoutResult<A, B>(
+    @field:Position(0) val revision: A,
+    @field:Position(1) val layout: B,
+) : Tuple()
 
 class ItemProperties(
     @field:Position(0) val id: Int,
@@ -122,7 +126,7 @@ interface SniMenu : DBusInterface {
     @DBusBoundProperty(access = DBusPropertyAccess.READ)
     fun getIconThemePath(): List<String>
 
-    fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): MenuLayoutResult
+    fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): MenuLayoutResult<UInt32, MenuLayout>
 
     fun GetGroupProperties(ids: List<Int>, propertyNames: List<String>): List<ItemProperties>
 
@@ -210,16 +214,22 @@ class LinuxSniTray(
     }
 
     private fun menuItems(): List<MenuLayout> = listOf(
-        MenuLayout(1, itemProps("Show / Hide popup"), emptyList()),
+        MenuLayout(1, itemProps("Show / Hide popup", "window-new"), emptyList()),
         MenuLayout(2, mapOf("type" to Variant("separator")), emptyList()),
-        MenuLayout(3, itemProps("Settings"), emptyList()),
-        MenuLayout(4, itemProps("Quit"), emptyList()),
+        MenuLayout(3, itemProps("Settings", "preferences-system"), emptyList()),
+        MenuLayout(4, itemProps("Quit", "application-exit"), emptyList()),
     )
 
-    private fun itemProps(label: String): Map<String, Variant<Any?>> = mapOf(
-        "label" to Variant(label),
-        "enabled" to Variant(true),
-    )
+    private fun itemProps(label: String, iconName: String? = null): Map<String, Variant<Any?>> {
+        val props = linkedMapOf<String, Variant<Any?>>(
+            "label" to Variant(label),
+            "enabled" to Variant(true),
+        )
+        if (iconName != null) {
+            props["icon-name"] = Variant(iconName)
+        }
+        return props
+    }
 
     private fun rootLayout(depth: Int): MenuLayout {
         return MenuLayout(
@@ -236,9 +246,9 @@ class LinuxSniTray(
         override fun getStatus() = "Active"
         override fun getWindowId() = 0
         override fun getItemIsMenu() = false
-        // "/NO_DBUSMENU" is Plasma's opt-out sentinel: without it Plasma tries to
-        // render our DBusMenu natively instead of calling our ContextMenu method.
-        override fun getMenu() = DBusPath("/NO_DBUSMENU")
+        // Hand the menu to Plasma: right-click is rendered by plasmashell over
+        // DBusMenu, so it works even when the app's AWT windows are stuck.
+        override fun getMenu() = DBusPath(MENU_PATH)
         override fun getIconName() = ""
         override fun getIconPixmap() = pixmap()
         override fun getAttentionIconName() = ""
@@ -263,7 +273,7 @@ class LinuxSniTray(
         override fun getStatus() = "normal"
         override fun getIconThemePath() = emptyList<String>()
 
-        override fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): MenuLayoutResult {
+        override fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): MenuLayoutResult<UInt32, MenuLayout> {
             val layout = if (parentId == 0) rootLayout(recursionDepth) else {
                 menuItems().firstOrNull { it.id == parentId } ?: rootLayout(0)
             }
@@ -273,9 +283,9 @@ class LinuxSniTray(
         override fun GetGroupProperties(ids: List<Int>, propertyNames: List<String>): List<ItemProperties> {
             return ids.map { id ->
                 val props = when (id) {
-                    1 -> itemProps("Show / Hide popup")
-                    3 -> itemProps("Settings")
-                    4 -> itemProps("Quit")
+                    1 -> itemProps("Show / Hide popup", "window-new")
+                    3 -> itemProps("Settings", "preferences-system")
+                    4 -> itemProps("Quit", "application-exit")
                     else -> emptyMap()
                 }
                 ItemProperties(id, props)
