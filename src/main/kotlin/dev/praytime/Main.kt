@@ -3,8 +3,6 @@
 package dev.praytime
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,7 +29,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -61,7 +58,11 @@ import dev.praytime.platform.anchorPosition
 import dev.praytime.ui.CompactView
 import dev.praytime.ui.DarkPalette
 import dev.praytime.ui.LightPalette
+import dev.praytime.ui.LocalAppType
+import dev.praytime.ui.AppTheme
 import dev.praytime.ui.LocalAppPalette
+import dev.praytime.ui.NotificationDroopRoom
+import dev.praytime.ui.pressable
 import dev.praytime.ui.PrayerNotification
 import dev.praytime.ui.ReminderController
 import dev.praytime.ui.ScheduleViewModel
@@ -79,6 +80,11 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.beans.PropertyChangeListener
 import kotlin.math.roundToInt
+
+private val CompactHeight = 400.dp
+private val NotificationHeight = 148.dp + NotificationDroopRoom
+private val SettingsWidth = 368.dp
+private val SettingsHeight = 576.dp
 
 fun main() = application {
     var compactVisible by remember { mutableStateOf(false) }
@@ -119,6 +125,8 @@ fun main() = application {
 
     val reminderController = remember { ReminderController() }
     var notifyVisible by remember { mutableStateOf(false) }
+    // Bumped on every show, so each reminder starts with fresh animation state.
+    var reminderShowCount by remember { mutableStateOf(0) }
     var notifyPrayer by remember { mutableStateOf<PrayerTime?>(null) }
     var testReminderVisible by remember { mutableStateOf(false) }
     var testReminderPrayer by remember { mutableStateOf<PrayerTime?>(null) }
@@ -130,6 +138,7 @@ fun main() = application {
         val day = viewModel.dayTimes.value
         val now = viewModel.now()
         testReminderPrayer = latestDuePrayer(day, emptySet(), now) ?: day.next(now) ?: day.times.last()
+        reminderShowCount++
         testReminderVisible = true
     }
 
@@ -153,7 +162,9 @@ fun main() = application {
             }.collect { due ->
                 reminderController.onTick(due, AppState.loadReminderEnabled())
                 notifyPrayer = reminderController.current
-                notifyVisible = reminderController.visible && !compactVisible && !menuVisible
+                val visible = reminderController.visible && !compactVisible && !menuVisible
+                if (visible && !notifyVisible) reminderShowCount++
+                notifyVisible = visible
             }
         }
     }
@@ -211,7 +222,7 @@ fun main() = application {
             tooltip = "Pray Time",
             primaryAction = { toggleCompact() },
         ) {
-            Item("Show / Hide popup") { toggleCompact() }
+            Item("Show prayer times") { toggleCompact() }
             Item("Settings") { showSettingsWindow() }
             Divider()
             Item("Quit") { quit() }
@@ -229,7 +240,7 @@ fun main() = application {
         focusable = true,
         alwaysOnTop = true,
         state = rememberWindowState(
-            size = DpSize(296.dp, 372.dp),
+            size = DpSize(296.dp, CompactHeight),
             position = WindowPosition(Alignment.TopEnd),
         ),
     ) {
@@ -241,7 +252,7 @@ fun main() = application {
                 .defaultScreenDevice.defaultConfiguration.bounds
             val margin = with(density) { 12.dp.roundToPx() }
             val width = with(density) { 296.dp.roundToPx() }
-            val height = with(density) { 372.dp.roundToPx() }
+            val height = with(density) { CompactHeight.roundToPx() }
             val position = anchorPosition(AppState.loadMainAnchor(), bounds, width, height, margin)
             window.setLocation(position.x, position.y)
         }
@@ -259,36 +270,8 @@ fun main() = application {
             focusManager.addPropertyChangeListener(listener)
             onDispose { focusManager.removePropertyChangeListener(listener) }
         }
-        var dragBase by remember { mutableStateOf<Point?>(null) }
-        var dragDelta by remember { mutableStateOf(Offset.Zero) }
-        var wmMoving by remember { mutableStateOf(false) }
-        val headerDrag = Modifier.pointerInput(Unit) {
-            detectDragGestures(
-                onDragStart = {
-                    // setLocation dragging jitters under XWayland; the WM's own
-                    // move tracks the pointer per-frame, so prefer it there.
-                    wmMoving = isLinux && LinuxWindowMover.requestInteractiveMove(window)
-                    if (!wmMoving) {
-                        dragBase = Point(window.x, window.y)
-                        dragDelta = Offset.Zero
-                    }
-                },
-                onDrag = { change, dragAmount ->
-                    change.consume()
-                    if (wmMoving) return@detectDragGestures
-                    val base = dragBase ?: return@detectDragGestures
-                    dragDelta += dragAmount
-                    val scale = density.density
-                    window.setLocation(
-                        base.x + (dragDelta.x * scale).roundToInt(),
-                        base.y + (dragDelta.y * scale).roundToInt(),
-                    )
-                },
-                onDragEnd = { dragBase = null; wmMoving = false },
-                onDragCancel = { dragBase = null; wmMoving = false },
-            )
-        }
-        CompositionLocalProvider(LocalAppPalette provides palette) {
+        val headerDrag = rememberWindowDrag(window, isLinux)
+        AppTheme(palette) {
             Box(modifier = Modifier.fillMaxSize()) {
                 CompactView(
                     viewModel = viewModel,
@@ -302,7 +285,7 @@ fun main() = application {
     val showNotification = notifyVisible || testReminderVisible
     SwingDialog(
         onCloseRequest = { if (testReminderVisible) testReminderVisible = false else dismissNotification() },
-        state = rememberDialogState(size = DpSize(296.dp, 148.dp)),
+        state = rememberDialogState(size = DpSize(328.dp, NotificationHeight)),
         visible = showNotification,
         title = "Pray Time",
         icon = null,
@@ -327,8 +310,8 @@ fun main() = application {
             val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                 .defaultScreenDevice.defaultConfiguration.bounds
             val margin = with(density) { 12.dp.roundToPx() }
-            val width = with(density) { 296.dp.roundToPx() }
-            val height = with(density) { 148.dp.roundToPx() }
+            val width = with(density) { 328.dp.roundToPx() }
+            val height = with(density) { NotificationHeight.roundToPx() }
             val position = anchorPosition(AppState.loadReminderAnchor(), bounds, width, height, margin)
             // AWT centers the dialog when it becomes visible, so keep overriding
             // for a few frames until it settles at the chosen anchor.
@@ -337,24 +320,33 @@ fun main() = application {
                 withFrameNanos { }
             }
         }
-        CompositionLocalProvider(LocalAppPalette provides palette) {
+        AppTheme(palette) {
             Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                 val prayer = if (testReminderVisible) testReminderPrayer else notifyPrayer
+                // Recompose every second so the "due since" age stays current.
+                viewModel.countdown.collectAsState().value
+                val now = viewModel.now()
+                val snoozeMinutes = AppState.loadReminderMinutes().takeIf { AppState.loadReminderEnabled() }
                 if (showNotification) {
                     prayer?.let { current ->
                         // Fresh animation state on every show: SwingDialog keeps the
-                        // hidden dialog's composition (and its remember state) alive,
-                        // so stale flags would leave the buttons permanently busy.
-                        key(showNotification, current.instant) {
+                        // hidden dialog's composition (and its remember state) alive
+                        // without recomposing it, so the last exit animation (card faded
+                        // or sunk out of view) would otherwise carry into the next show.
+                        key(reminderShowCount, current.instant) {
                             if (testReminderVisible) {
                                 PrayerNotification(
                                     prayer = current,
+                                    now = now,
+                                    snoozeMinutes = snoozeMinutes,
                                     onPrayed = { testReminderVisible = false },
                                     onDismiss = { testReminderVisible = false },
                                 )
                             } else {
                                 PrayerNotification(
                                     prayer = current,
+                                    now = now,
+                                    snoozeMinutes = snoozeMinutes,
                                     onPrayed = { viewModel.markPrayed(current, true) },
                                     onDismiss = { dismissNotification() },
                                 )
@@ -404,21 +396,20 @@ fun main() = application {
             focusManager.addPropertyChangeListener(listener)
             onDispose { focusManager.removePropertyChangeListener(listener) }
         }
-        CompositionLocalProvider(LocalAppPalette provides palette) {
+        AppTheme(palette) {
             Box(modifier = Modifier.fillMaxSize().padding(10.dp)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .shadow(6.dp, RoundedCornerShape(14.dp))
+                        .shadow(8.dp, RoundedCornerShape(14.dp))
                         .clip(RoundedCornerShape(14.dp))
                         .background(palette.surface)
                         .padding(vertical = 4.dp),
                 ) {
-                    MenuRow("Show / Hide popup") {
+                    MenuRow(if (compactVisible) "Hide prayer times" else "Show prayer times") {
                         menuVisible = false
                         toggleCompact()
                     }
-                    HorizontalDivider(color = palette.divider)
                     MenuRow("Settings") {
                         menuVisible = false
                         showSettingsWindow()
@@ -435,7 +426,7 @@ fun main() = application {
 
     SwingDialog(
         onCloseRequest = { settingsVisible = false },
-        state = rememberDialogState(size = DpSize(296.dp, 680.dp)),
+        state = rememberDialogState(size = DpSize(SettingsWidth, SettingsHeight)),
         visible = settingsVisible,
         title = "Pray Time Settings",
         icon = null,
@@ -458,8 +449,8 @@ fun main() = application {
         LaunchedEffect(Unit) {
             val bounds = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
                 .defaultScreenDevice.defaultConfiguration.bounds
-            val width = with(density) { 296.dp.roundToPx() }
-            val height = with(density) { 680.dp.roundToPx() }
+            val width = with(density) { SettingsWidth.roundToPx() }
+            val height = with(density) { SettingsHeight.roundToPx() }
             // AWT centers the dialog when it becomes visible, so keep overriding
             // for a few frames until it settles centered on the screen.
             repeat(5) {
@@ -481,10 +472,11 @@ fun main() = application {
             focusManager.addPropertyChangeListener(listener)
             onDispose { focusManager.removePropertyChangeListener(listener) }
         }
-        CompositionLocalProvider(LocalAppPalette provides palette) {
+        AppTheme(palette) {
             Box(modifier = Modifier.fillMaxSize()) {
                 SettingsView(
                     viewModel = viewModel,
+                    headerDrag = rememberWindowDrag(window, isLinux),
                     themeMode = themeMode,
                     onThemeModeChange = setThemeMode,
                     onClose = { settingsVisible = false },
@@ -502,6 +494,41 @@ private fun clampToScreen(x: Int, y: Int): Pair<Int, Int> {
     return clampedX to clampedY
 }
 
+/** Drags an undecorated window by the modified element, through the window manager where possible. */
+@Composable
+private fun rememberWindowDrag(window: java.awt.Window, isLinux: Boolean): Modifier {
+    val density = LocalDensity.current
+    var dragBase by remember { mutableStateOf<Point?>(null) }
+    var dragDelta by remember { mutableStateOf(Offset.Zero) }
+    var wmMoving by remember { mutableStateOf(false) }
+    return Modifier.pointerInput(window) {
+        detectDragGestures(
+            onDragStart = {
+                // setLocation dragging jitters under XWayland; the WM's own
+                // move tracks the pointer per-frame, so prefer it there.
+                wmMoving = isLinux && LinuxWindowMover.requestInteractiveMove(window)
+                if (!wmMoving) {
+                    dragBase = Point(window.x, window.y)
+                    dragDelta = Offset.Zero
+                }
+            },
+            onDrag = { change, dragAmount ->
+                change.consume()
+                if (wmMoving) return@detectDragGestures
+                val base = dragBase ?: return@detectDragGestures
+                dragDelta += dragAmount
+                val scale = density.density
+                window.setLocation(
+                    base.x + (dragDelta.x * scale).roundToInt(),
+                    base.y + (dragDelta.y * scale).roundToInt(),
+                )
+            },
+            onDragEnd = { dragBase = null; wmMoving = false },
+            onDragCancel = { dragBase = null; wmMoving = false },
+        )
+    }
+}
+
 @Composable
 private fun TransparentWindowBackground(window: java.awt.Window) {
     DisposableEffect(window) {
@@ -517,13 +544,9 @@ private fun MenuRow(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .pressable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        Text(
-            label,
-            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-            color = palette.onSurface,
-        )
+        Text(label, style = LocalAppType.current.body(13.sp, FontWeight.Medium), color = palette.onSurface)
     }
 }

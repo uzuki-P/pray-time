@@ -15,6 +15,8 @@ Requirements:
 just dev
 ```
 
+To build the AppImage and install it to `~/apps/pray-time.AppImage` with a launcher entry, run `just update`. `just uninstall` removes the install.
+
 On Linux the tray is a hand-rolled StatusNotifierItem over DBus (dbus-java) with `ItemIsMenu=false`, so a left click toggles the compact popup directly — no menu detour, no xembed proxy. The popup shows the region, next prayer with live countdown, and today's checklist; left click again dismisses it. The right-click menu (rendered by the desktop via DBusMenu) has "Open schedule" and Quit. Closing the main window only hides it — the app keeps running in the tray until Quit. Windows and macOS still use the ComposeNativeTray library. Closing the window leaves the tray process running.
 
 ## Location search and data files
@@ -41,6 +43,10 @@ Keep calculation, scheduling, persistence, and UI in separate packages as the ap
 - Verify Windows autostart (implemented via the HKCU Run key; Linux XDG autostart is done and tested).
 - Decide how to handle notification permissions and desktop-environment differences.
 - Extend tests for month boundaries and high-latitude edge cases.
+
+## Fonts
+
+The UI bundles Reem Kufi (prayer names, Latin and Arabic) and IBM Plex Sans (everything else, subset to Latin) from `src/main/composeResources/font`. Both are under the SIL Open Font License; the license texts ship in `src/main/resources/licenses`.
 
 ## Icons
 

@@ -1,15 +1,6 @@
 package dev.praytime.ui
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,54 +10,30 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.praytime.calculation.DayPrayerTimes
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalTime
-import java.time.ZoneId
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlinx.coroutines.launch
-
-internal val prayerColors = mapOf(
-    "Fajr" to Color(0xFF9D8CFF),
-    "Sunrise" to Color(0xFFFFC24D),
-    "Dhuhr" to Color(0xFF4DA3FF),
-    "Asr" to Color(0xFFFF8A5C),
-    "Maghrib" to Color(0xFFFF5C8A),
-    "Isha" to Color(0xFF5A6FE0),
-)
-
-internal fun minuteFraction(instant: Instant, zone: ZoneId): Float =
-    LocalTime.ofInstant(instant, zone).toSecondOfDay() / 86_400f
 
 internal fun compactRemaining(remaining: Duration?): String {
     val total = (remaining?.seconds ?: 0).coerceAtLeast(0)
@@ -80,19 +47,23 @@ internal fun compactRemaining(remaining: Duration?): String {
     }
 }
 
-internal data class SkyTheme(val colors: List<Color>)
-
-internal fun skyTheme(day: DayPrayerTimes, now: Instant): SkyTheme {
-    val byName = day.times.associateBy { it.name }
-    fun before(name: String): Boolean = now < byName.getValue(name).instant
-    return when {
-        before("Fajr") || !before("Isha") -> SkyTheme(listOf(Color(0xFF12122E), Color(0xFF232052)))
-        before("Sunrise") -> SkyTheme(listOf(Color(0xFF3A2B6E), Color(0xFFF98A5E)))
-        before("Dhuhr") -> SkyTheme(listOf(Color(0xFF1F5FB0), Color(0xFF6FB1F2)))
-        before("Maghrib") -> SkyTheme(listOf(Color(0xFF2E7BC8), Color(0xFFF7C46C)))
-        else -> SkyTheme(listOf(Color(0xFF54277F), Color(0xFFF2665E)))
-    }
+/**
+ * Where `now` sits along the schedule, in row units: 0 is the first row's centre,
+ * 1.5 is halfway between the second and third rows. Clamped to the first and last rows.
+ */
+internal fun railPosition(day: DayPrayerTimes, now: Instant): Float {
+    val times = day.times
+    if (now <= times.first().instant) return 0f
+    if (now >= times.last().instant) return (times.size - 1).toFloat()
+    val index = times.indexOfLast { it.instant <= now }
+    val start = times[index].instant.epochSecond
+    val end = times[index + 1].instant.epochSecond
+    return index + (now.epochSecond - start).toFloat() / (end - start)
 }
+
+private val RowHeight = 34.dp
+private val RailInset = 11.dp
+private val ListPadding = 6.dp
 
 @Composable
 fun CompactView(
@@ -105,16 +76,16 @@ fun CompactView(
     val completed by viewModel.completed.collectAsState()
     val now = viewModel.now()
     val next = countdown.nextPrayer
-    val sky = skyTheme(dayTimes, now)
     val latestDue = latestDuePrayer(dayTimes, completed, now)
     val palette = LocalAppPalette.current
-    val shape = RoundedCornerShape(20.dp)
+    val type = LocalAppType.current
+    val shape = RoundedCornerShape(18.dp)
 
     Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         Column(
             modifier = Modifier
                 .width(272.dp)
-                .shadow(6.dp, shape)
+                .shadow(8.dp, shape)
                 .clip(shape)
                 .background(palette.surface),
         ) {
@@ -122,219 +93,154 @@ fun CompactView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(headerDrag)
-                    .background(Brush.verticalGradient(sky.colors))
-                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 10.dp),
+                    .background(Brush.verticalGradient(listOf(skyColors.getValue(next?.name ?: "Isha").copy(alpha = 0.2f), palette.surface)))
+                    .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 12.dp),
             ) {
                 if (next != null) {
-                    Text(
-                        "NEXT PRAYER",
-                        style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp),
-                        color = Color.White.copy(alpha = 0.7f),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Next prayer", style = type.body(12.sp, FontWeight.Medium), color = palette.muted)
+                        Spacer(Modifier.weight(1f))
+                        Text(arabicNames.getValue(next.name), style = type.display(15.sp, FontWeight.Medium), color = palette.muted)
+                    }
+                    Text(next.name, style = type.display(32.sp), color = palette.onSurface)
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            next.name,
-                            style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.ExtraBold),
-                            color = Color.White,
+                            "in ${compactRemaining(countdown.timeRemaining)}",
+                            style = type.figures(15.sp, FontWeight.SemiBold),
+                            color = palette.accent,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            compactRemaining(countdown.timeRemaining),
-                            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-                            color = Color.White.copy(alpha = 0.85f),
-                            modifier = Modifier.padding(bottom = 3.dp),
-                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("at ${next.displayTime}", style = type.figures(13.sp), color = palette.muted)
                     }
                 }
-                SunArcCanvas(
-                    day = dayTimes,
-                    now = now,
-                    modifier = Modifier.fillMaxWidth().height(64.dp).padding(top = 10.dp),
-                )
             }
 
+            val railPos = railPosition(dayTimes, now)
             Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = ListPadding)
+                    .drawWithContent {
+                        drawContent()
+                        drawRail(dayTimes, railPos, palette)
+                    },
             ) {
                 dayTimes.times.forEach { prayer ->
                     val done = prayer.instant in completed
                     val isNext = prayer == next
+                    val isDue = prayer == latestDue
+                    val arrived = prayer.instant <= now
                     Row(
-                        modifier = Modifier.fillMaxWidth().height(26.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(RowHeight)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isDue) palette.due.copy(alpha = 0.12f) else Color.Transparent)
+                            .padding(start = RailInset * 2 + 6.dp, end = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(
-                            modifier = Modifier.size(8.dp).clip(CircleShape).background(prayerColors.getValue(prayer.name)),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            prayer.name,
-                            style = TextStyle(fontSize = 13.sp, fontWeight = if (isNext) FontWeight.Bold else FontWeight.Medium),
-                            color = palette.onSurface.copy(alpha = if (done) 0.4f else 1f),
-                            textDecoration = if (done) TextDecoration.LineThrough else null,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (prayer == latestDue) {
+                        if (prayer.isPrayer) {
                             Text(
-                                "DUE",
-                                style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Black),
-                                color = Color(0xFFFFC24D),
+                                prayer.name,
+                                style = type.display(16.sp, if (isNext || isDue) FontWeight.Bold else FontWeight.Medium),
+                                color = when {
+                                    done -> palette.faint
+                                    isNext -> palette.accent
+                                    else -> palette.onSurface
+                                },
+                                modifier = Modifier.weight(1f),
                             )
-                            Spacer(Modifier.width(6.dp))
+                        } else {
+                            Text(prayer.name, style = type.body(12.sp), color = palette.faint, modifier = Modifier.weight(1f))
+                        }
+                        if (isDue) {
+                            Text("Due", style = type.body(11.sp, FontWeight.Bold), color = palette.due)
+                            Spacer(Modifier.width(8.dp))
                         }
                         Text(
                             prayer.displayTime,
-                            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                            color = palette.onSurface.copy(alpha = if (done) 0.4f else 0.9f),
+                            style = type.figures(if (prayer.isPrayer) 14.sp else 12.sp, if (isNext || isDue) FontWeight.SemiBold else FontWeight.Medium),
+                            color = when {
+                                !prayer.isPrayer || done -> palette.faint
+                                isNext -> palette.accent
+                                else -> palette.muted
+                            },
                         )
-                        Spacer(Modifier.width(8.dp))
-                        CheckCircle(
-                            done = done,
-                            enabled = prayer.isPrayer,
-                            size = 16.dp,
-                            iconSize = 10.sp,
-                        ) {
-                            viewModel.markPrayed(prayer, !done)
+                        Box(modifier = Modifier.width(32.dp), contentAlignment = Alignment.CenterEnd) {
+                            if (prayer.isPrayer) {
+                                PrayerCheck(
+                                    done = done,
+                                    due = isDue,
+                                    enabled = arrived,
+                                    onClick = { viewModel.markPrayed(prayer, !done) },
+                                )
+                            }
                         }
                     }
                 }
             }
 
+            Box(Modifier.fillMaxWidth().height(1.dp).background(palette.divider))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onOpenSettings)
-                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
+                    .pressable(onClick = onOpenSettings)
+                    .padding(start = 18.dp, end = 18.dp, top = 9.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     dayTimes.region.displayName,
-                    style = TextStyle(fontSize = 10.sp),
-                    color = palette.onSurface.copy(alpha = 0.45f),
+                    style = type.body(12.sp),
+                    color = palette.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "SETTINGS",
-                    style = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-                    color = palette.accent,
-                )
+                Text("Settings", style = type.body(12.sp, FontWeight.SemiBold), color = palette.accent)
             }
         }
     }
 }
 
-@Composable
-internal fun CheckCircle(
-    done: Boolean,
-    size: androidx.compose.ui.unit.Dp,
-    iconSize: androidx.compose.ui.unit.TextUnit,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    val prayedGreen = Color(0xFF3EDC81)
-    val palette = LocalAppPalette.current
-    val pop = remember { Animatable(1f) }
-    val burst = remember { Animatable(0f) }
-    var wasDone by remember { mutableStateOf(done) }
-    LaunchedEffect(done) {
-        if (done && !wasDone) {
-            pop.snapTo(0.55f)
-            burst.snapTo(0f)
-            launch { pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = Spring.StiffnessMedium)) }
-            burst.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
-        }
-        wasDone = done
-    }
-    val fill by animateColorAsState(
-        targetValue = when {
-            done -> prayedGreen
-            !enabled -> palette.onSurface.copy(alpha = 0.06f)
-            else -> Color.Transparent
-        },
-        label = "checkFill",
-    )
-    Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
-        if (burst.value > 0f && burst.value < 1f) {
-            Box(
-                modifier = Modifier
-                    .size(size * (1f + 0.9f * burst.value))
-                    .border(
-                        width = (1.5f * (1f - burst.value)).dp,
-                        color = prayedGreen.copy(alpha = 1f - burst.value),
-                        shape = CircleShape,
-                    ),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .size(size)
-                .graphicsLayer {
-                    scaleX = pop.value
-                    scaleY = pop.value
-                }
-                .clip(CircleShape)
-                .background(fill)
-                .border(1.5.dp, palette.onSurface.copy(alpha = if (enabled) 0.3f else 0.12f), CircleShape)
-                .clickable(enabled = enabled, onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                done -> Text(
-                    "✓",
-                    style = TextStyle(fontSize = iconSize, fontWeight = FontWeight.Black),
-                    color = Color(0xFF0B2E1B),
-                )
-                !enabled -> Box(
-                    modifier = Modifier
-                        .size(width = 6.dp, height = 1.5.dp)
-                        .background(palette.onSurface.copy(alpha = 0.25f)),
-                )
-            }
-        }
-    }
-}
+/**
+ * The schedule rail: a line through every row, coloured with the sky of each period up to
+ * `now` and faint after it, with a node per schedule time and a marker at `now`.
+ */
+private fun DrawScope.drawRail(day: DayPrayerTimes, railPos: Float, palette: AppPalette) {
+    val x = RailInset.toPx()
+    val rowHeight = RowHeight.toPx()
+    fun y(position: Float) = (position + 0.5f) * rowHeight
+    val colors = day.times.map { skyColors.getValue(it.name) }
+    val nowY = y(railPos)
 
-@Composable
-internal fun SunArcCanvas(day: DayPrayerTimes, now: Instant, modifier: Modifier = Modifier) {
-    val zone = ZoneId.of(day.region.timezoneId)
-    val byName = day.times.associateBy { it.name }
-    Canvas(modifier) {
-        val baseline = size.height * 0.84f
-        val rx = size.width * 0.44f
-        val ry = size.height * 0.68f
-        val cx = size.width / 2f
-        fun point(fraction: Float): Offset {
-            val theta = Math.PI * (1.0 - fraction)
-            return Offset(cx + (rx * cos(theta)).toFloat(), baseline - (ry * sin(theta)).toFloat())
-        }
+    drawLine(palette.divider, Offset(x, nowY), Offset(x, y(day.times.lastIndex.toFloat())), 2.dp.toPx(), StrokeCap.Round)
+    for (i in 0 until day.times.lastIndex) {
+        if (railPos <= i) break
+        val top = y(i.toFloat())
+        val bottom = y((i + 1).toFloat())
         drawLine(
-            color = Color.White.copy(alpha = 0.35f),
-            start = Offset(0f, baseline),
-            end = Offset(size.width, baseline),
-            strokeWidth = 1.dp.toPx(),
+            brush = Brush.verticalGradient(listOf(colors[i], colors[i + 1]), startY = top, endY = bottom),
+            start = Offset(x, top),
+            end = Offset(x, minOf(bottom, nowY)),
+            strokeWidth = 3.dp.toPx(),
+            cap = StrokeCap.Round,
         )
-        drawArc(
-            color = Color.White.copy(alpha = 0.25f),
-            startAngle = 180f,
-            sweepAngle = 180f,
-            useCenter = false,
-            topLeft = Offset(cx - rx, baseline - ry),
-            size = Size(rx * 2f, ry * 2f),
-            style = Stroke(width = 1.2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 6f))),
-        )
-        day.times.forEach { prayer ->
-            drawCircle(
-                color = prayerColors.getValue(prayer.name),
-                radius = 3.dp.toPx(),
-                center = point(minuteFraction(prayer.instant, zone)),
-            )
+    }
+    day.times.forEachIndexed { index, prayer ->
+        val center = Offset(x, y(index.toFloat()))
+        val radius = (if (prayer.isPrayer) 5.dp else 3.5.dp).toPx()
+        if (index <= railPos) {
+            drawCircle(colors[index], radius, center)
+        } else {
+            drawCircle(palette.surface, radius, center)
+            drawCircle(colors[index], radius - 1.dp.toPx(), center, style = Stroke(2.dp.toPx()))
         }
-        val sunrise = byName.getValue("Sunrise").instant
-        val sunset = byName.getValue("Maghrib").instant
-        val sunColor = if (now >= sunrise && now <= sunset) Color(0xFFFFD54A) else Color(0xFFD9E2FF)
-        val position = point(minuteFraction(now, zone))
-        drawCircle(color = sunColor.copy(alpha = 0.22f), radius = 11.dp.toPx(), center = position)
-        drawCircle(color = sunColor, radius = 5.dp.toPx(), center = position)
+    }
+    val atNode = railPos == railPos.toInt().toFloat()
+    if (!atNode) {
+        val half = 5.dp.toPx()
+        drawLine(palette.surface, Offset(x - half - 1.dp.toPx(), nowY), Offset(x + half + 1.dp.toPx(), nowY), 4.dp.toPx(), StrokeCap.Round)
+        drawLine(palette.onSurface, Offset(x - half, nowY), Offset(x + half, nowY), 2.dp.toPx(), StrokeCap.Round)
     }
 }

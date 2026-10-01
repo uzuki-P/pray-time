@@ -3,10 +3,12 @@ package dev.praytime.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -18,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,18 +44,18 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -68,11 +69,15 @@ import dev.praytime.platform.AppState
 import dev.praytime.platform.Autostart
 import dev.praytime.platform.CityCatalog
 import dev.praytime.platform.WindowAnchor
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
+
+enum class SettingsTab(val label: String) { REGION("Region"), REMINDERS("Reminders"), GENERAL("General") }
 
 private fun ThemeMode.label(): String = when (this) {
     ThemeMode.SYSTEM -> "System"
@@ -89,6 +94,14 @@ private fun WindowAnchor.label(): String = when (this) {
     WindowAnchor.BOTTOM_RIGHT -> "Bottom right"
 }
 
+private fun Region.subtitle(): String = listOfNotNull(adminName.ifBlank { null }, country).joinToString(", ")
+
+private fun Region.coordinates(): String {
+    fun format(value: Double, positive: Char, negative: Char) =
+        String.format(Locale.ROOT, "%.2f°%c", abs(value), if (value >= 0) positive else negative)
+    return "${format(latitude, 'N', 'S')} ${format(longitude, 'E', 'W')} · $timezoneId"
+}
+
 @Composable
 fun SettingsView(
     viewModel: ScheduleViewModel,
@@ -96,21 +109,53 @@ fun SettingsView(
     onThemeModeChange: (ThemeMode) -> Unit,
     onClose: () -> Unit,
     onTestReminder: () -> Unit = {},
+    initialTab: SettingsTab = SettingsTab.REGION,
+    headerDrag: Modifier = Modifier,
     modifier: Modifier = Modifier,
 ) {
+    val palette = LocalAppPalette.current
+    val type = LocalAppType.current
+    val shape = RoundedCornerShape(18.dp)
+    var tab by remember { mutableStateOf(initialTab) }
+
+    Box(modifier = modifier.fillMaxSize().padding(12.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .shadow(8.dp, shape)
+                .clip(shape)
+                .background(palette.surface)
+                .padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 16.dp),
+        ) {
+            Row(modifier = Modifier.then(headerDrag), verticalAlignment = Alignment.CenterVertically) {
+                Text("Settings", style = type.display(22.sp), color = palette.onSurface, modifier = Modifier.weight(1f))
+                CloseButton(onClick = onClose)
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.padding(end = 6.dp)) {
+                Segmented(SettingsTab.entries, tab, { it.label }, { tab = it })
+            }
+            Spacer(Modifier.height(16.dp))
+            Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(end = 6.dp)) {
+                when (tab) {
+                    SettingsTab.REGION -> RegionTab(viewModel)
+                    SettingsTab.REMINDERS -> RemindersTab(onTestReminder)
+                    SettingsTab.GENERAL -> GeneralTab(themeMode, onThemeModeChange)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.RegionTab(viewModel: ScheduleViewModel) {
     val dayTimes by viewModel.dayTimes.collectAsState()
     val palette = LocalAppPalette.current
-    val shape = RoundedCornerShape(20.dp)
+    val type = LocalAppType.current
     val listScrollState = rememberScrollState()
-
     var query by remember { mutableStateOf("") }
     var catalogResults by remember { mutableStateOf<List<Region>?>(null) }
     var recents by remember { mutableStateOf(AppState.recentRegions()) }
-    var autostartEnabled by remember { mutableStateOf(Autostart.isEnabled()) }
-    var reminderEnabled by remember { mutableStateOf(AppState.loadReminderEnabled()) }
-    var reminderMinutes by remember { mutableStateOf(AppState.loadReminderMinutes()) }
-    var reminderAnchor by remember { mutableStateOf(AppState.loadReminderAnchor()) }
-    var mainAnchor by remember { mutableStateOf(AppState.loadMainAnchor()) }
 
     LaunchedEffect(query) {
         val q = query.trim()
@@ -138,249 +183,223 @@ fun SettingsView(
         recents = AppState.recentRegions()
     }
 
-    Box(modifier = modifier.fillMaxSize().padding(12.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(palette.raised)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text("Prayer times are calculated for", style = type.body(11.sp), color = palette.muted)
+        Text(selected.name, style = type.body(16.sp, FontWeight.SemiBold), color = palette.onSurface)
+        Text(selected.subtitle(), style = type.body(12.sp), color = palette.muted)
+        Text(selected.coordinates(), style = type.figures(11.sp, FontWeight.Normal), color = palette.faint)
+    }
+    Spacer(Modifier.height(12.dp))
+    SearchField(query = query, onQueryChange = { query = it })
+    Spacer(Modifier.height(6.dp))
+    Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
         Column(
             modifier = Modifier
-                .width(272.dp)
-                .shadow(6.dp, shape)
-                .clip(shape)
-                .background(palette.surface)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .fillMaxSize()
+                .padding(end = 10.dp)
+                .verticalScroll(listScrollState),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (q.isEmpty()) {
+                if (recents.isNotEmpty()) {
+                    GroupLabel("Recent")
+                    RegionRows(recents, selected) { select(it) }
+                }
+                GroupLabel("Suggested")
+                RegionRows(builtInRegions, selected) { select(it) }
+            } else if (merged != null && merged.isEmpty()) {
                 Text(
-                    "SETTINGS",
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp),
-                    color = palette.onSurface.copy(alpha = 0.7f),
+                    "Nothing matches \"$q\". Try a city, district, or kelurahan name.",
+                    style = type.body(12.sp),
+                    color = palette.muted,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
                 )
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(palette.onSurface.copy(alpha = 0.1f))
-                        .clickable(onClick = onClose),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "✕",
-                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Black),
-                        color = palette.onSurface.copy(alpha = 0.75f),
-                    )
+            } else {
+                RegionRows(merged ?: localMatches, selected) { select(it) }
+                if (catalogResults == null) {
+                    GroupLabel("Searching the world list…")
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            SectionLabel("REGION")
-            SearchField(query = query, onQueryChange = { query = it })
-            Spacer(Modifier.height(6.dp))
-            Box(modifier = Modifier.fillMaxWidth().weight(1f, fill = true)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(end = 8.dp)
-                        .verticalScroll(listScrollState),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    if (q.isEmpty()) {
-                        if (recents.isNotEmpty()) {
-                            SectionLabel("RECENT")
-                            RegionRows(recents, selected) { select(it) }
-                        }
-                        SectionLabel("ALL REGIONS")
-                        RegionRows(builtInRegions, selected) { select(it) }
-                    } else if (merged != null && merged.isEmpty()) {
-                        Text(
-                            "No region matches \"$q\"",
-                            style = TextStyle(fontSize = 11.sp),
-                            color = palette.onSurface.copy(alpha = 0.35f),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                        )
-                    } else {
-                        if (merged != null) {
-                            RegionRows(merged, selected) { select(it) }
-                        } else if (localMatches.isNotEmpty()) {
-                            RegionRows(localMatches, selected) { select(it) }
-                        }
-                        if (catalogResults == null) {
-                            SectionLabel("SEARCHING…")
-                        }
-                    }
-                }
-                Scrollbar(listScrollState, modifier = Modifier.align(Alignment.CenterEnd))
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel("REMINDER")
-            ToggleRow("Remind every $reminderMinutes min", reminderEnabled) {
+        }
+        Scrollbar(listScrollState, modifier = Modifier.align(Alignment.CenterEnd))
+    }
+}
+
+@Composable
+private fun RemindersTab(onTestReminder: () -> Unit) {
+    var reminderEnabled by remember { mutableStateOf(AppState.loadReminderEnabled()) }
+    var reminderMinutes by remember { mutableStateOf(AppState.loadReminderMinutes()) }
+    var reminderAnchor by remember { mutableStateOf(AppState.loadReminderAnchor()) }
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        SettingRow(
+            title = "Snooze due reminders",
+            description = if (reminderEnabled) {
+                "Snoozing hides the reminder, and it returns while the prayer is still not marked as prayed."
+            } else {
+                "Dismissing hides the reminder until the next prayer is due."
+            },
+        ) {
+            Switch(reminderEnabled, onToggle = {
                 AppState.saveReminderEnabled(!reminderEnabled)
                 reminderEnabled = AppState.loadReminderEnabled()
-            }
-            IntervalStepperRow(reminderMinutes) { minutes ->
+            })
+        }
+        SettingRow(title = "Snooze for", enabled = reminderEnabled) {
+            MinutesStepper(reminderMinutes, enabled = reminderEnabled) { minutes ->
                 AppState.saveReminderMinutes(minutes)
                 reminderMinutes = AppState.loadReminderMinutes()
             }
-            PickerLabel("Notification position")
-            AnchorGrid(reminderAnchor) { anchor ->
-                reminderAnchor = anchor
-                AppState.saveReminderAnchor(anchor)
-            }
-            TestReminderRow(onClick = onTestReminder)
-            Spacer(Modifier.height(8.dp))
-            SectionLabel("MAIN WINDOW")
-            PickerLabel("Default position")
-            AnchorGrid(mainAnchor) { anchor ->
-                mainAnchor = anchor
-                AppState.saveMainAnchor(anchor)
-            }
-            Spacer(Modifier.height(6.dp))
-            ToggleRow("Start on login", autostartEnabled) {
+        }
+        PositionSetting("Reminder position", reminderAnchor) { anchor ->
+            reminderAnchor = anchor
+            AppState.saveReminderAnchor(anchor)
+        }
+        PillButton(ButtonKind.Quiet, onClick = onTestReminder) { color ->
+            ButtonLabel("Show a test reminder", color)
+        }
+    }
+}
+
+@Composable
+private fun GeneralTab(themeMode: ThemeMode, onThemeModeChange: (ThemeMode) -> Unit) {
+    var autostartEnabled by remember { mutableStateOf(Autostart.isEnabled()) }
+    var mainAnchor by remember { mutableStateOf(AppState.loadMainAnchor()) }
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        SettingRow(title = "Theme") {
+            Segmented(listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK), themeMode, { it.label() }, onThemeModeChange)
+        }
+        SettingRow(title = "Start on login", description = "Opens Pray Time in the tray when you sign in.") {
+            Switch(autostartEnabled, onToggle = {
                 Autostart.setEnabled(!autostartEnabled)
                 autostartEnabled = Autostart.isEnabled()
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel("APPEARANCE")
-            PickerLabel("Theme")
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(ThemeMode.SYSTEM, ThemeMode.DARK, ThemeMode.LIGHT).forEach { mode ->
-                    val isSelected = mode == themeMode
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(24.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) palette.accent else palette.onSurface.copy(alpha = 0.08f))
-                            .clickable { onThemeModeChange(mode) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            mode.label(),
-                            style = TextStyle(
-                                fontSize = 10.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            ),
-                            color = if (isSelected) palette.onAccent else palette.onSurface.copy(alpha = 0.75f),
-                        )
-                    }
-                }
-            }
+            })
+        }
+        PositionSetting("Popup position", mainAnchor) { anchor ->
+            mainAnchor = anchor
+            AppState.saveMainAnchor(anchor)
         }
     }
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, onToggle: () -> Unit) {
+private fun SettingRow(
+    title: String,
+    description: String? = null,
+    enabled: Boolean = true,
+    control: @Composable () -> Unit,
+) {
     val palette = LocalAppPalette.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(26.dp)
-            .clickable(onClick = onToggle),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-            color = palette.onSurface.copy(alpha = 0.75f),
-            modifier = Modifier.weight(1f),
-        )
-        CheckCircle(done = checked, size = 16.dp, iconSize = 10.sp, onClick = onToggle)
-    }
-}
-
-@Composable
-private fun PickerLabel(text: String) {
-    val palette = LocalAppPalette.current
-    Text(
-        text,
-        style = TextStyle(fontSize = 10.sp),
-        color = palette.onSurface.copy(alpha = 0.45f),
-        modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 3.dp),
-    )
-}
-
-@Composable
-private fun AnchorGrid(selected: WindowAnchor, onSelect: (WindowAnchor) -> Unit) {
-    val palette = LocalAppPalette.current
-    val rows = listOf(
-        listOf(WindowAnchor.TOP_LEFT, WindowAnchor.TOP_RIGHT),
-        listOf(WindowAnchor.MIDDLE_LEFT, WindowAnchor.MIDDLE_RIGHT),
-        listOf(WindowAnchor.BOTTOM_LEFT, WindowAnchor.BOTTOM_RIGHT),
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        rows.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                row.forEach { anchor ->
-                    val isSelected = anchor == selected
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(24.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) palette.accent else palette.onSurface.copy(alpha = 0.08f))
-                            .clickable { onSelect(anchor) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            anchor.label(),
-                            style = TextStyle(
-                                fontSize = 10.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            ),
-                            color = if (isSelected) palette.onAccent else palette.onSurface.copy(alpha = 0.75f),
-                        )
-                    }
-                }
+    val type = LocalAppType.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = type.body(13.sp, FontWeight.SemiBold), color = if (enabled) palette.onSurface else palette.faint)
+            if (description != null) {
+                Text(description, style = type.body(11.sp), color = palette.muted)
             }
         }
+        control()
     }
 }
 
 @Composable
-private fun SectionLabel(label: String) {
+private fun GroupLabel(label: String) {
     val palette = LocalAppPalette.current
     Text(
         label,
-        style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-        color = palette.onSurface.copy(alpha = 0.4f),
-        modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+        style = LocalAppType.current.body(11.sp, FontWeight.SemiBold),
+        color = palette.faint,
+        modifier = Modifier.padding(start = 10.dp, top = 10.dp, bottom = 4.dp),
     )
 }
 
 @Composable
 private fun RegionRows(regions: List<Region>, selected: Region, onSelect: (Region) -> Unit) {
     val palette = LocalAppPalette.current
+    val type = LocalAppType.current
     regions.forEach { region ->
         val isSelected = region == selected
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 26.dp)
-                .clickable { onSelect(region) },
+                .heightIn(min = 40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (isSelected) palette.accent.copy(alpha = 0.12f) else Color.Transparent)
+                .pressable(role = Role.RadioButton) { onSelect(region) }
+                .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(palette.onSurface.copy(alpha = if (isSelected) 0.7f else 0.2f)),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                region.displayName,
-                style = TextStyle(fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium),
-                color = palette.onSurface.copy(alpha = if (isSelected) 1f else 0.75f),
-                modifier = Modifier.weight(1f).padding(vertical = 3.dp),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.width(8.dp))
-            CheckCircle(done = isSelected, size = 16.dp, iconSize = 10.sp, onClick = { onSelect(region) })
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    region.name,
+                    style = type.body(13.sp, if (isSelected) FontWeight.SemiBold else FontWeight.Medium),
+                    color = palette.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(region.subtitle(), style = type.body(11.sp), color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (isSelected) {
+                CheckIcon(palette.accent, Modifier.size(16.dp), strokeWidth = 2.dp)
+            }
+        }
+    }
+}
+
+/** A miniature screen with the six anchor spots; the chosen spot is drawn as a small window. */
+@Composable
+private fun PositionSetting(title: String, selected: WindowAnchor, onSelect: (WindowAnchor) -> Unit) {
+    val palette = LocalAppPalette.current
+    val type = LocalAppType.current
+    val rows = listOf(
+        WindowAnchor.TOP_LEFT to WindowAnchor.TOP_RIGHT,
+        WindowAnchor.MIDDLE_LEFT to WindowAnchor.MIDDLE_RIGHT,
+        WindowAnchor.BOTTOM_LEFT to WindowAnchor.BOTTOM_RIGHT,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = type.body(13.sp, FontWeight.SemiBold), color = palette.onSurface)
+            Text(selected.label(), style = type.body(11.sp), color = palette.muted)
+        }
+        Column(
+            modifier = Modifier
+                .width(132.dp)
+                .height(84.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(palette.raised)
+                .border(1.5.dp, palette.divider, RoundedCornerShape(8.dp))
+                .padding(5.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            rows.forEach { (left, right) ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    listOf(left, right).forEach { anchor ->
+                        val isSelected = anchor == selected
+                        Box(
+                            modifier = Modifier
+                                .width(40.dp)
+                                .height(20.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isSelected) palette.accent else palette.onSurface.copy(alpha = 0.07f))
+                                .pressable(role = Role.RadioButton) { onSelect(anchor) },
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
+private fun MinutesStepper(minutes: Int, enabled: Boolean, onChange: (Int) -> Unit) {
     val palette = LocalAppPalette.current
+    val type = LocalAppType.current
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(TextFieldValue(minutes.toString())) }
     var fieldHadFocus by remember { mutableStateOf(false) }
@@ -408,18 +427,19 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
     LaunchedEffect(editing) { if (editing) focusRequester.requestFocus() }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(palette.raised)
+            .padding(3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StepperTile("-", enabled = minutes > AppState.MIN_REMINDER_MINUTES) { onChange(minutes - 1) }
+        StepperButton("−", enabled = enabled && minutes > AppState.MIN_REMINDER_MINUTES) { onChange(minutes - 1) }
         Box(
             modifier = Modifier
-                .weight(1f)
-                .height(24.dp)
+                .width(64.dp)
+                .height(26.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(palette.accent)
-                .clickable(enabled = !editing) { beginEdit() },
+                .pressable(enabled = enabled && !editing) { beginEdit() },
             contentAlignment = Alignment.Center,
         ) {
             if (editing) {
@@ -431,13 +451,8 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
                         if (value.text.all(Char::isDigit) && value.text.length <= 3) draft = value
                     },
                     singleLine = true,
-                    textStyle = TextStyle(
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.onAccent,
-                        textAlign = TextAlign.Center,
-                    ),
-                    cursorBrush = SolidColor(palette.onAccent),
+                    textStyle = type.figures(13.sp, FontWeight.SemiBold).copy(color = palette.onSurface, textAlign = TextAlign.Center),
+                    cursorBrush = SolidColor(palette.accent),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -463,53 +478,27 @@ private fun IntervalStepperRow(minutes: Int, onChange: (Int) -> Unit) {
             } else {
                 Text(
                     "$minutes min",
-                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                    color = palette.onAccent,
+                    style = type.figures(13.sp, FontWeight.SemiBold),
+                    color = if (enabled) palette.onSurface else palette.faint,
                 )
             }
         }
-        StepperTile("+", enabled = minutes < AppState.MAX_REMINDER_MINUTES) { onChange(minutes + 1) }
+        StepperButton("+", enabled = enabled && minutes < AppState.MAX_REMINDER_MINUTES) { onChange(minutes + 1) }
     }
 }
 
 @Composable
-private fun StepperTile(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+private fun StepperButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
     val palette = LocalAppPalette.current
     Box(
         modifier = Modifier
-            .width(40.dp)
-            .height(24.dp)
+            .size(26.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(palette.onSurface.copy(alpha = if (enabled) 0.08f else 0.04f))
-            .clickable(enabled = enabled, onClick = onClick),
+            .background(if (enabled) palette.surface else Color.Transparent)
+            .pressable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            symbol,
-            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Black),
-            color = palette.onSurface.copy(alpha = if (enabled) 0.75f else 0.25f),
-        )
-    }
-}
-
-@Composable
-private fun TestReminderRow(onClick: () -> Unit) {
-    val palette = LocalAppPalette.current
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp)
-            .height(24.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(palette.onSurface.copy(alpha = 0.08f))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            "Test due reminder notification",
-            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium),
-            color = palette.onSurface.copy(alpha = 0.75f),
-        )
+        Text(symbol, style = LocalAppType.current.body(15.sp, FontWeight.SemiBold), color = if (enabled) palette.onSurface else palette.faint)
     }
 }
 
@@ -557,25 +546,22 @@ private fun Scrollbar(scrollState: ScrollState, modifier: Modifier = Modifier) {
 @Composable
 private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
     val palette = LocalAppPalette.current
+    val type = LocalAppType.current
     BasicTextField(
         value = query,
         onValueChange = onQueryChange,
         singleLine = true,
-        textStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.onSurface),
+        textStyle = type.body(13.sp, FontWeight.Medium).copy(color = palette.onSurface),
         cursorBrush = SolidColor(palette.accent),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(palette.onSurface.copy(alpha = 0.08f))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, palette.divider, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         decorationBox = { inner ->
             Box {
                 if (query.isEmpty()) {
-                    Text(
-                        "Search region…",
-                        style = TextStyle(fontSize = 12.sp),
-                        color = palette.onSurface.copy(alpha = 0.35f),
-                    )
+                    Text("Search for a city or district", style = type.body(13.sp), color = palette.faint)
                 }
                 inner()
             }

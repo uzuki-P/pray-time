@@ -14,6 +14,19 @@ build:
 build-appimage:
     ./gradlew packageAppImageFile
 
+# Install the newest AppImage to ~/apps with a desktop entry, so KDE/vicinae
+# launchers can start it by name regardless of build file names.
+install:
+    scripts/install-appimage
+
+# Remove the installed AppImage, desktop entry and icon.
+uninstall:
+    scripts/install-appimage --uninstall
+
+# One-shot release flow: build, stage a dated copy in _apk/, refresh the
+# ~/apps install and the KDE/vicinae menu entry.
+update: build-appimage install
+
 # Build the Windows portable zip (requires building on Windows).
 build-windows-portable:
     ./gradlew packageAppImage stageWindowsPortable
