@@ -1,6 +1,5 @@
 package dev.praytime.platform
 
-import dev.nucleusframework.darkmodedetector.getPlatformDarkModeDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -11,6 +10,7 @@ import org.freedesktop.dbus.annotations.Position
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
+import org.freedesktop.dbus.messages.DBusSignal
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import org.freedesktop.dbus.Struct
@@ -113,6 +113,9 @@ interface SniItem : DBusInterface {
     fun SecondaryActivate(x: Int, y: Int)
     fun Scroll(delta: Int, orientation: String)
     fun ContextMenu(x: Int, y: Int)
+
+    // Plasma caches IconPixmap; this tells it to read the property again.
+    class NewIcon(path: String) : DBusSignal(path)
 }
 
 @DBusInterfaceName("com.canonical.dbusmenu")
@@ -150,6 +153,7 @@ private const val ITEM_PATH = "/StatusNotifierItem"
 private const val MENU_PATH = "/StatusNotifierMenu"
 
 class LinuxSniTray(
+    dark: Boolean,
     private val onPrimaryClick: () -> Unit,
     private val onContextMenu: (x: Int, y: Int) -> Unit,
     private val onSettings: () -> Unit,
@@ -157,6 +161,15 @@ class LinuxSniTray(
 ) {
     private var connection: DBusConnection? = null
     private val revision = AtomicInteger(1)
+    @Volatile private var dark = dark
+
+    fun setDark(value: Boolean) {
+        if (dark == value) return
+        dark = value
+        connection?.let { conn ->
+            runCatching { conn.sendMessage(SniItem.NewIcon(ITEM_PATH)) }
+        }
+    }
 
     fun start() {
         thread(name = "praytime-sni", isDaemon = true) {
@@ -189,7 +202,7 @@ class LinuxSniTray(
 
     private fun pixmap(): List<IconPixmap> {
         return runCatching {
-            val name = if (getPlatformDarkModeDetector().isDark()) {
+            val name = if (dark) {
                 "pray_time_tray_dark.png"
             } else {
                 "pray_time_tray_light.png"
@@ -203,11 +216,12 @@ class LinuxSniTray(
             img.getRGB(0, 0, img.width, img.height, argb, 0, img.width)
             val data = ByteArray(argb.size * 4)
             var index = 0
+            // SNI wants ARGB32 in network byte order: A, R, G, B.
             for (pixel in argb) {
-                data[index++] = (pixel and 0xFF).toByte()
-                data[index++] = ((pixel shr 8) and 0xFF).toByte()
-                data[index++] = ((pixel shr 16) and 0xFF).toByte()
                 data[index++] = ((pixel shr 24) and 0xFF).toByte()
+                data[index++] = ((pixel shr 16) and 0xFF).toByte()
+                data[index++] = ((pixel shr 8) and 0xFF).toByte()
+                data[index++] = (pixel and 0xFF).toByte()
             }
             listOf(IconPixmap(img.width, img.height, data))
         }.getOrDefault(emptyList())

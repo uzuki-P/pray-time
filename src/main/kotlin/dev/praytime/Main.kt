@@ -203,19 +203,23 @@ fun main() = application {
     }
 
     if (isLinux) {
-        DisposableEffect(Unit) {
+        val tray = remember {
             fun onEdt(block: () -> Unit) {
                 java.awt.EventQueue.invokeLater(block)
             }
-            val tray = LinuxSniTray(
+            LinuxSniTray(
+                dark = darkTheme,
                 onPrimaryClick = { onEdt { toggleCompact() } },
                 onContextMenu = { x, y -> onEdt { showMenu(x, y) } },
                 onSettings = { onEdt { showSettingsWindow() } },
                 onQuit = { onEdt { quit() } },
             )
+        }
+        DisposableEffect(tray) {
             tray.start()
             onDispose { tray.stop() }
         }
+        LaunchedEffect(darkTheme) { tray.setDark(darkTheme) }
     } else {
         Tray(
             icon = trayIcon,
