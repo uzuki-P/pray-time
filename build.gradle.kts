@@ -49,7 +49,7 @@ compose.desktop {
 
         nativeDistributions {
             modules("jdk.security.auth", "java.sql", "jdk.unsupported")
-            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
+            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Exe)
             packageName = "pray-time"
             packageVersion = "0.1.1"
             description = "Prayer time reminders for Windows and Linux"
@@ -62,6 +62,14 @@ compose.desktop {
             windows {
                 iconFile.set(project.file("src/main/resources/icons/pray-time.ico"))
                 menuGroup = "Pray Time"
+                // Fixed for every release so a newer installer replaces the installed app.
+                upgradeUuid = "3f6b2a4e-9c1d-4e7a-8b52-6d0f1c8a9e37"
+                // Per-user install into %LOCALAPPDATA%\pray-time: no admin prompt, and
+                // `just update-exe` can swap the files in place.
+                perUserInstall = true
+                shortcut = true
+                menu = true
+                dirChooser = true
             }
         }
     }
