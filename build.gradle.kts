@@ -3,8 +3,6 @@ import java.net.URI
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 plugins {
     kotlin("jvm") version "2.4.20"
@@ -13,7 +11,20 @@ plugins {
 }
 
 group = "dev.praytime"
-version = "0.1.1"
+// Every build is versioned `<versionBase>.<commit count>`, as in lyrics-float, so each
+// commit has a higher version. Windows Installer compares only major.minor.build (each
+// <= 255.255.65535) and refuses to reinstall an equal version, so a hash or a 4th field
+// would not work. Falls back to 0 without git (a source tarball or a shallow clone
+// counts only the commits it has). The justfile reads versionBase from this line.
+val versionBase = "0.1"
+val commitCount: Int =
+    runCatching {
+        providers.exec {
+            commandLine("git", "rev-list", "--count", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim().toInt()
+    }.getOrDefault(0)
+version = "$versionBase.$commitCount"
 
 kotlin {
     jvmToolchain(17)
@@ -51,7 +62,7 @@ compose.desktop {
             modules("jdk.security.auth", "java.sql", "jdk.unsupported")
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage, TargetFormat.Exe)
             packageName = "pray-time"
-            packageVersion = "0.1.1"
+            packageVersion = project.version.toString()
             description = "Prayer time reminders for Windows and Linux"
             copyright = "Copyright © 2026 Uzuki-P"
 
@@ -64,8 +75,8 @@ compose.desktop {
                 menuGroup = "Pray Time"
                 // Fixed for every release so a newer installer replaces the installed app.
                 upgradeUuid = "3f6b2a4e-9c1d-4e7a-8b52-6d0f1c8a9e37"
-                // Per-user install into %LOCALAPPDATA%\pray-time: no admin prompt, and
-                // `just update-exe` can swap the files in place.
+                // Per-user install into %LOCALAPPDATA%\pray-time, as lyrics-float does: no
+                // admin prompt, and `just update-exe` can swap the files in place.
                 perUserInstall = true
                 shortcut = true
                 menu = true
@@ -113,29 +124,6 @@ val appImageToolFile = File(System.getProperty("user.home"), ".cache/pray-time/t
 val appImageSourceDir = layout.projectDirectory.dir("build/compose/binaries/main/app/pray-time")
 val appImageOutputDir = layout.projectDirectory.dir("build/compose/binaries/main/appimage")
 val appImageIconFile = layout.projectDirectory.file("src/main/resources/icons/pray-time.png").asFile
-
-// Windows portable build: the jpackage app-image folder (pray-time.exe plus bundled runtime),
-// zipped as-is - no installer, runs from anywhere it is extracted. No-op on other platforms.
-val stageWindowsPortable = tasks.register("stageWindowsPortable") {
-    val sourceDir = appImageSourceDir
-    val outputDir = stagedArtifactsDir
-    val version = project.version.toString()
-    doLast {
-        val dir = sourceDir.asFile
-        if (!File(dir, "pray-time.exe").exists()) return@doLast
-        outputDir.asFile.mkdirs()
-        val staged = File(outputDir.asFile, "pray-time-$version-windows-portable.zip")
-        ZipOutputStream(staged.outputStream()).use { zip ->
-            dir.walkTopDown().filter { it.isFile }.forEach { file ->
-                val entry = ZipEntry("pray-time/" + file.toRelativeString(dir).replace('\\', '/'))
-                zip.putNextEntry(entry)
-                file.inputStream().use { it.copyTo(zip) }
-                zip.closeEntry()
-            }
-        }
-        println("Staged artifact: ${staged.absolutePath}")
-    }
-}
 
 tasks.register("packageAppImageFile") {
     dependsOn("packageAppImage")
@@ -210,4 +198,3 @@ tasks.register("packageAppImageFile") {
 }
 
 tasks.matching { it.name == "packageAppImageFile" }.configureEach { finalizedBy(stageAppImage) }
-tasks.matching { it.name == "packageAppImage" }.configureEach { finalizedBy(stageWindowsPortable) }

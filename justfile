@@ -3,7 +3,8 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 gradlew := if os_family() == "windows" { ".\\gradlew.bat" } else { "./gradlew" }
-app_version := replace_regex(read("build.gradle.kts"), '(?s).*\n\s*packageVersion = "([^"]*)".*', '$1')
+# `<versionBase>.<commit count>`, matching build.gradle.kts.
+app_version := replace_regex(read("build.gradle.kts"), '(?s).*\nval versionBase = "([^"]*)".*', '$1') + "." + `git rev-list --count HEAD`
 # The real binary, not the npm shim on PATH: Windows PowerShell blocks its just.ps1.
 just := if os_family() == "windows" { "& '" + just_executable() + "'" } else { quote(just_executable()) }
 exe_output := "build/compose/binaries/main/exe/pray-time-" + app_version + ".exe"
@@ -45,11 +46,6 @@ uninstall:
 [unix]
 update: build-appimage install
 
-# On Windows: build the portable zip (app folder with bundled runtime) into _apk/.
-[windows]
-build-windows-portable:
-    .\gradlew.bat packageAppImage stageWindowsPortable
-
 # On Windows: build the EXE installer and stage it in _apk/.
 [windows]
 [script("powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
@@ -72,48 +68,53 @@ build-exe:
 [extension(".ps1")]
 update-exe:
     $ErrorActionPreference = "Stop"
-    {{just}} build-exe | Tee-Object -Variable buildOutput
+    # Run build-exe without a pipe or capture: the Gradle and Kotlin daemons it starts
+    # inherit the pipe's write end, so Tee-Object or $(...) would wait until they exit.
+    {{just}} build-exe
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $staged = @($buildOutput)[-1]
-    & .\scripts\update-installed-exe.ps1 -Installer $staged -Version "{{app_version}}"
+    # The newest staged copy of this version is the one build-exe just wrote.
+    $staged = Get-ChildItem -LiteralPath _apk -Filter "pray-time-{{app_version}}_*.exe" | Sort-Object CreationTime | Select-Object -Last 1
+    if (-not $staged) { throw "build-exe left no staged installer for {{app_version}} in _apk." }
+    & .\scripts\update-installed-exe.ps1 -Installer $staged.FullName -Version "{{app_version}}"
 
-# Bump the app version: just bump [major|minor|patch] (default patch).
+# Wait for the GitHub Actions EXE build of the pushed HEAD, save it in _apk/, and share it via Gokapi.
 [unix]
-@bump part="patch":
+ci-exe:
+    bash scripts/ci-exe
+
+# Bump versionBase (the last field is the commit count): just bump [major|minor].
+[unix]
+@bump part="minor":
     #!/usr/bin/env bash
     set -euo pipefail
     file="build.gradle.kts"
-    current=$(grep -oP 'packageVersion = "\K[0-9]+\.[0-9]+\.[0-9]+' "$file")
-    IFS='.' read -r major minor patch <<< "$current"
+    current=$(grep -oP '^val versionBase = "\K[0-9]+\.[0-9]+' "$file")
+    IFS='.' read -r major minor <<< "$current"
     case "{{part}}" in
-      major) major=$((major+1)); minor=0; patch=0;;
-      minor) minor=$((minor+1)); patch=0;;
-      patch) patch=$((patch+1));;
-      *) echo "unknown part '{{part}}' (use major, minor or patch)"; exit 1;;
+      major) major=$((major+1)); minor=0;;
+      minor) minor=$((minor+1));;
+      *) echo "unknown part '{{part}}' (use major or minor)"; exit 1;;
     esac
-    next="$major.$minor.$patch"
-    sed -i "s/packageVersion = \"$current\"/packageVersion = \"$next\"/" "$file"
-    sed -i "s/^version = \"$current\"/version = \"$next\"/" "$file"
-    echo "version: $current -> $next"
+    next="$major.$minor"
+    sed -i "s/^val versionBase = \"$current\"/val versionBase = \"$next\"/" "$file"
+    echo "versionBase: $current -> $next"
 
-# Bump the app version: just bump [major|minor|patch] (default patch).
+# Bump versionBase (the last field is the commit count): just bump [major|minor].
 [windows]
 [script("powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
 [extension(".ps1")]
-bump part="patch":
+bump part="minor":
     $ErrorActionPreference = "Stop"
     $file = "build.gradle.kts"
     $text = [IO.File]::ReadAllText((Resolve-Path $file))
-    $current = [regex]::Match($text, 'packageVersion = "(\d+\.\d+\.\d+)"').Groups[1].Value
+    $current = [regex]::Match($text, '(?m)^val versionBase = "(\d+\.\d+)"').Groups[1].Value
     [int[]]$v = $current.Split('.')
     switch ("{{part}}") {
-      "major" { $v = @(($v[0] + 1), 0, 0) }
-      "minor" { $v = @($v[0], ($v[1] + 1), 0) }
-      "patch" { $v = @($v[0], $v[1], ($v[2] + 1)) }
-      default { Write-Host "unknown part '{{part}}' (use major, minor or patch)"; exit 1 }
+      "major" { $v = @(($v[0] + 1), 0) }
+      "minor" { $v = @($v[0], ($v[1] + 1)) }
+      default { Write-Host "unknown part '{{part}}' (use major or minor)"; exit 1 }
     }
     $next = $v -join '.'
-    $text = $text.Replace("packageVersion = `"$current`"", "packageVersion = `"$next`"")
-    $text = [regex]::Replace($text, "(?m)^version = `"$([regex]::Escape($current))`"", "version = `"$next`"")
+    $text = [regex]::Replace($text, "(?m)^val versionBase = `"$([regex]::Escape($current))`"", "val versionBase = `"$next`"")
     [IO.File]::WriteAllText((Resolve-Path $file), $text)
-    Write-Host "version: $current -> $next"
+    Write-Host "versionBase: $current -> $next"
